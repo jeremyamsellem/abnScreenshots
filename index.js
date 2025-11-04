@@ -2,15 +2,16 @@
  * High-Resolution Map Capture Tool
  *
  * This tool captures high-definition map images for specified zip codes.
+ * Uses a 3x3 grid pattern to ensure full coverage of the zip code area.
  *
  * SETUP:
  * 1. Install dependencies: npm install axios sharp
- * 2. That's it! ESRI satellite imagery is FREE and requires NO API key or credit card
+ * 2. That's it! No API keys needed for street maps (geoapify) or satellite (ESRI)
  *
  * USAGE:
- * - Set CONFIG.provider to 'esri' for FREE satellite imagery (RECOMMENDED)
- * - Or 'mapbox' for satellite (requires credit card), or 'geoapify' for street maps
+ * - Set CONFIG.provider to 'geoapify' for street maps or 'esri' for satellite
  * - Add zip codes to CONFIG.zipCodes array
+ * - Set use3x3Grid: true to download center + 8 surrounding areas (recommended)
  * - Run: node index.js
  *
  * OUTPUT:
@@ -38,9 +39,8 @@ const CONFIG = {
     zoom: 18, // Higher = more detail (max ~19 for ESRI, ~20-21 for Mapbox)
     tileSize: 256,
 
-    // Bounding box expansion (to ensure full zip code coverage)
-    // Value of 0.1 = expand by 10% on each side, 0.2 = 20%, etc.
-    bboxExpansion: 0.15, // Expand by 15% to capture full area
+    // Download 3x3 grid (center = zip code, 8 surrounding areas of same size)
+    use3x3Grid: true,
 
     // Geoapify style options: 'osm-carto', 'osm-bright', 'osm-bright-grey', 'klokantech-basic', 'osm-liberty'
     geoapifyStyle: 'osm-carto',
@@ -138,34 +138,47 @@ const downloadAndStitchMaps = async () => {
                 bbox = [lon - halfSide, lat - halfSide, lon + halfSide, lat + halfSide];
             }
 
-            let [minLon, minLat, maxLon, maxLat] = bbox;
+            const [minLon, minLat, maxLon, maxLat] = bbox;
 
             // Log original bounding box
-            console.log(`Original bbox: [${minLon.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLon.toFixed(6)}, ${maxLat.toFixed(6)}]`);
+            console.log(`Zip code bbox: [${minLon.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLon.toFixed(6)}, ${maxLat.toFixed(6)}]`);
 
-            // Expand bounding box to ensure full coverage
-            if (CONFIG.bboxExpansion > 0) {
-                const lonPadding = (maxLon - minLon) * CONFIG.bboxExpansion;
-                const latPadding = (maxLat - minLat) * CONFIG.bboxExpansion;
+            // Calculate tile range for the original zip code area
+            const centerMinTileX = long2tile(minLon, CONFIG.zoom);
+            const centerMaxTileX = long2tile(maxLon, CONFIG.zoom);
+            const centerMinTileY = lat2tile(maxLat, CONFIG.zoom);
+            const centerMaxTileY = lat2tile(minLat, CONFIG.zoom);
 
-                minLon -= lonPadding;
-                maxLon += lonPadding;
-                minLat -= latPadding;
-                maxLat += latPadding;
+            const centerNumTilesX = centerMaxTileX - centerMinTileX + 1;
+            const centerNumTilesY = centerMaxTileY - centerMinTileY + 1;
 
-                console.log(`Expanded bbox: [${minLon.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLon.toFixed(6)}, ${maxLat.toFixed(6)}] (${(CONFIG.bboxExpansion * 100).toFixed(0)}% expansion)`);
+            console.log(`Center area: X[${centerMinTileX} to ${centerMaxTileX}] (${centerNumTilesX} tiles), Y[${centerMinTileY} to ${centerMaxTileY}] (${centerNumTilesY} tiles)`);
+
+            // Expand to 3x3 grid if enabled
+            let minTileX, maxTileX, minTileY, maxTileY;
+            if (CONFIG.use3x3Grid) {
+                // Add the same width/height on each side to create a 3x3 grid
+                minTileX = centerMinTileX - centerNumTilesX;
+                maxTileX = centerMaxTileX + centerNumTilesX;
+                minTileY = centerMinTileY - centerNumTilesY;
+                maxTileY = centerMaxTileY + centerNumTilesY;
+
+                const numTilesX = maxTileX - minTileX + 1;
+                const numTilesY = maxTileY - minTileY + 1;
+
+                console.log(`📐 Using 3x3 grid pattern:`);
+                console.log(`   Full area: X[${minTileX} to ${maxTileX}] (${numTilesX} tiles), Y[${minTileY} to ${maxTileY}] (${numTilesY} tiles)`);
+                console.log(`   Downloading ${numTilesX * numTilesY} tiles (center area + 8 surrounding areas)...`);
+            } else {
+                minTileX = centerMinTileX;
+                maxTileX = centerMaxTileX;
+                minTileY = centerMinTileY;
+                maxTileY = centerMaxTileY;
+                console.log(`Downloading ${centerNumTilesX * centerNumTilesY} tiles...`);
             }
-
-            const minTileX = long2tile(minLon, CONFIG.zoom);
-            const maxTileX = long2tile(maxLon, CONFIG.zoom);
-            const minTileY = lat2tile(maxLat, CONFIG.zoom);
-            const maxTileY = lat2tile(minLat, CONFIG.zoom);
 
             const numTilesX = maxTileX - minTileX + 1;
             const numTilesY = maxTileY - minTileY + 1;
-
-            console.log(`Tile range: X[${minTileX} to ${maxTileX}] (${numTilesX} tiles), Y[${minTileY} to ${maxTileY}] (${numTilesY} tiles)`);
-            console.log(`Downloading ${numTilesX * numTilesY} tiles for ${zipCode}...`);
 
             const tilePromises = [];
             for (let y = minTileY; y <= maxTileY; y++) {

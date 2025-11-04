@@ -4,12 +4,13 @@ Automatically capture high-definition satellite or street map images for zip cod
 
 ## Features
 
-- ✅ **100% FREE**: ESRI satellite imagery with NO credit card required!
-- ✅ **Three providers**: ESRI (satellite), Mapbox (satellite), or Geoapify (street maps)
-- ✅ **High resolution**: High-quality satellite imagery at zoom 18
+- ✅ **100% FREE**: No credit card required for street maps or satellite imagery!
+- ✅ **3x3 Grid Coverage**: Downloads center area + 8 surrounding areas for complete coverage
+- ✅ **Three providers**: Geoapify (street maps), ESRI (satellite), or Mapbox (satellite)
+- ✅ **High resolution**: High-quality imagery at zoom 18
 - ✅ **Batch processing**: Process multiple zip codes at once
 - ✅ **Automatic stitching**: Seamlessly combines tiles into one image
-- ✅ **No API key needed**: ESRI requires zero setup
+- ✅ **No API key needed**: Works out of the box!
 
 ## Setup
 
@@ -28,9 +29,20 @@ const CONFIG = {
     provider: 'geoapify',  // Street maps (or 'esri' for satellite)
     zipCodes: ['07030', '10001'],  // Add your zip codes
     zoom: 18,  // 18 = high detail, 15 = wider area
-    bboxExpansion: 0.15,  // Expand by 15% to ensure full coverage
+    use3x3Grid: true,  // Download center + 8 surrounding areas (recommended!)
 };
 ```
+
+## How the 3x3 Grid Works
+
+The tool downloads a 3×3 grid pattern where:
+```
+[Area] [Area] [Area]
+[Area] [ZIP]  [Area]  ← ZIP = your zip code area
+[Area] [Area] [Area]
+```
+
+Each area has the same width and height as the zip code's bounding box, ensuring complete coverage of the entire region and surrounding context.
 
 ### 3. Optional API Keys (only if not using ESRI)
 
@@ -102,14 +114,14 @@ Higher zoom = more detail but more tiles = more API calls
 - **Or switch to ESRI**: Set `provider: 'esri'` for no API key needed!
 
 ### Image Doesn't Cover Full Zip Code Area
-- **Increase `bboxExpansion`**: Try 0.2 (20%) or 0.3 (30%) for larger padding
-- **Lower `zoom` level**: Try zoom 17 or 16 for wider coverage
-- **Check the logs**: The console shows the original and expanded bounding box coordinates
+- **Enable 3x3 grid**: Set `use3x3Grid: true` (should already be enabled by default)
+- **Lower `zoom` level**: Try zoom 17 or 16 for wider coverage per tile
+- **Check the logs**: The console shows the center area and full grid coverage
 
-Example for larger coverage:
+Example:
 ```javascript
-bboxExpansion: 0.3,  // 30% expansion
-zoom: 17,            // Wider area
+use3x3Grid: true,  // Ensures full coverage
+zoom: 17,          // Wider area per tile
 ```
 
 ### Image Quality Too Low
@@ -129,10 +141,11 @@ npm install axios sharp
 ## How It Works
 
 1. **Geocoding**: Converts zip code to lat/lon coordinates and bounding box
-2. **Tile Calculation**: Determines which map tiles cover the area
-3. **Parallel Download**: Fetches all tiles simultaneously
-4. **Stitching**: Uses Sharp library to composite tiles into one image
-5. **Output**: Saves high-resolution PNG
+2. **Tile Calculation**: Determines which map tiles cover the zip code area
+3. **3x3 Grid Expansion**: Extends coverage to include 8 surrounding areas of equal size
+4. **Parallel Download**: Fetches all tiles simultaneously (9x the zip code area)
+5. **Stitching**: Uses Sharp library to composite all tiles into one seamless image
+6. **Output**: Saves high-resolution PNG with complete coverage
 
 ## Example Output
 
@@ -150,13 +163,16 @@ Perfect for:
 
 ## Usage Estimates
 
-For a typical zip code area at zoom 18:
-- Small zip code: ~20-50 tiles
-- Medium zip code: ~50-150 tiles
-- Large zip code: ~150-500 tiles
+For a typical zip code area at zoom 18 with 3x3 grid enabled:
+- Small zip code: ~180-450 tiles (9x coverage)
+- Medium zip code: ~450-1,350 tiles (9x coverage)
+- Large zip code: ~1,350-4,500 tiles (9x coverage)
 
-**ESRI**: No known rate limits - truly unlimited and free!
-**Mapbox** free tier (50,000 tiles/month): ~100-2,500 zip codes depending on size
+**Note**: 3x3 grid downloads 9x more tiles (center + 8 surrounding areas) to ensure complete coverage.
+
+**Geoapify** (street maps): Free tier available
+**ESRI** (satellite): No known rate limits - truly unlimited and free!
+**Mapbox** free tier (50,000 tiles/month): ~11-370 zip codes depending on size with 3x3 grid
 
 ## License
 
