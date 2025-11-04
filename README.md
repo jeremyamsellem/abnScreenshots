@@ -25,9 +25,10 @@ Edit `index.js` and update the `CONFIG` object:
 
 ```javascript
 const CONFIG = {
-    provider: 'esri',  // FREE satellite imagery (no setup needed!)
+    provider: 'geoapify',  // Street maps (or 'esri' for satellite)
     zipCodes: ['07030', '10001'],  // Add your zip codes
     zoom: 18,  // 18 = high detail, 15 = wider area
+    bboxExpansion: 0.15,  // Expand by 15% to ensure full coverage
 };
 ```
 
@@ -99,6 +100,17 @@ Higher zoom = more detail but more tiles = more API calls
 - Make sure you've replaced `YOUR_MAPBOX_TOKEN_HERE` with your actual token
 - Verify the token is active at https://account.mapbox.com/access-tokens/
 - **Or switch to ESRI**: Set `provider: 'esri'` for no API key needed!
+
+### Image Doesn't Cover Full Zip Code Area
+- **Increase `bboxExpansion`**: Try 0.2 (20%) or 0.3 (30%) for larger padding
+- **Lower `zoom` level**: Try zoom 17 or 16 for wider coverage
+- **Check the logs**: The console shows the original and expanded bounding box coordinates
+
+Example for larger coverage:
+```javascript
+bboxExpansion: 0.3,  // 30% expansion
+zoom: 17,            // Wider area
+```
 
 ### Image Quality Too Low
 - Increase the `zoom` level (try 19 or 20)

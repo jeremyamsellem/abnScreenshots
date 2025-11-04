@@ -38,6 +38,10 @@ const CONFIG = {
     zoom: 18, // Higher = more detail (max ~19 for ESRI, ~20-21 for Mapbox)
     tileSize: 256,
 
+    // Bounding box expansion (to ensure full zip code coverage)
+    // Value of 0.1 = expand by 10% on each side, 0.2 = 20%, etc.
+    bboxExpansion: 0.15, // Expand by 15% to capture full area
+
     // Geoapify style options: 'osm-carto', 'osm-bright', 'osm-bright-grey', 'klokantech-basic', 'osm-liberty'
     geoapifyStyle: 'osm-carto',
 
@@ -134,7 +138,23 @@ const downloadAndStitchMaps = async () => {
                 bbox = [lon - halfSide, lat - halfSide, lon + halfSide, lat + halfSide];
             }
 
-            const [minLon, minLat, maxLon, maxLat] = bbox;
+            let [minLon, minLat, maxLon, maxLat] = bbox;
+
+            // Log original bounding box
+            console.log(`Original bbox: [${minLon.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLon.toFixed(6)}, ${maxLat.toFixed(6)}]`);
+
+            // Expand bounding box to ensure full coverage
+            if (CONFIG.bboxExpansion > 0) {
+                const lonPadding = (maxLon - minLon) * CONFIG.bboxExpansion;
+                const latPadding = (maxLat - minLat) * CONFIG.bboxExpansion;
+
+                minLon -= lonPadding;
+                maxLon += lonPadding;
+                minLat -= latPadding;
+                maxLat += latPadding;
+
+                console.log(`Expanded bbox: [${minLon.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLon.toFixed(6)}, ${maxLat.toFixed(6)}] (${(CONFIG.bboxExpansion * 100).toFixed(0)}% expansion)`);
+            }
 
             const minTileX = long2tile(minLon, CONFIG.zoom);
             const maxTileX = long2tile(maxLon, CONFIG.zoom);
@@ -144,6 +164,7 @@ const downloadAndStitchMaps = async () => {
             const numTilesX = maxTileX - minTileX + 1;
             const numTilesY = maxTileY - minTileY + 1;
 
+            console.log(`Tile range: X[${minTileX} to ${maxTileX}] (${numTilesX} tiles), Y[${minTileY} to ${maxTileY}] (${numTilesY} tiles)`);
             console.log(`Downloading ${numTilesX * numTilesY} tiles for ${zipCode}...`);
 
             const tilePromises = [];
