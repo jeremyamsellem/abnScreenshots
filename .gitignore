@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Generated map images
+*.png
+!example.png
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
