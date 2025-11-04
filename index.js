@@ -24,10 +24,10 @@ const sharp = require('sharp');
 // ============ CONFIGURATION ============
 const CONFIG = {
     // Provider options:
-    // - 'esri' (FREE satellite, no credit card required) ⭐ RECOMMENDED
+    // - 'geoapify' (street map, free) ⭐ DEFAULT
+    // - 'esri' (FREE satellite, no credit card required)
     // - 'mapbox' (satellite, requires credit card for free tier)
-    // - 'geoapify' (street map, free)
-    provider: 'esri',
+    provider: 'geoapify',
 
     // API Keys (only needed for certain providers)
     geoapifyKey: 'bb4c8bd74f714b58909203373fed1f2a',
@@ -37,6 +37,9 @@ const CONFIG = {
     zipCodes: ['07030'],
     zoom: 18, // Higher = more detail (max ~19 for ESRI, ~20-21 for Mapbox)
     tileSize: 256,
+
+    // Geoapify style options: 'osm-carto', 'osm-bright', 'osm-bright-grey', 'klokantech-basic', 'osm-liberty'
+    geoapifyStyle: 'osm-carto',
 
     // Mapbox style options: 'satellite-v9' (pure satellite), 'satellite-streets-v12' (satellite + labels)
     mapboxStyle: 'satellite-v9'
@@ -95,7 +98,8 @@ const getTileUrl = (x, y, zoom) => {
 
         case 'geoapify':
             // Geoapify Maps API (OpenStreetMap based)
-            return `https://maps.geoapify.com/v1/tile/osm-carto/${zoom}/${x}/${y}.png?apiKey=${CONFIG.geoapifyKey}`;
+            // Styles: osm-carto, osm-bright, osm-bright-grey, klokantech-basic, osm-liberty
+            return `https://maps.geoapify.com/v1/tile/${CONFIG.geoapifyStyle}/${zoom}/${x}/${y}.png?apiKey=${CONFIG.geoapifyKey}`;
 
         default:
             throw new Error(`Unknown provider: ${CONFIG.provider}`);
