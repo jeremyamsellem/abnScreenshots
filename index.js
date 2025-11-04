@@ -5,11 +5,11 @@
  *
  * SETUP:
  * 1. Install dependencies: npm install axios sharp
- * 2. Get a Mapbox token: https://account.mapbox.com/access-tokens/ (Free: 50,000 tiles/month)
- * 3. Add your Mapbox token to CONFIG.mapboxToken below
+ * 2. That's it! ESRI satellite imagery is FREE and requires NO API key or credit card
  *
  * USAGE:
- * - Set CONFIG.provider to 'mapbox' for satellite imagery or 'geoapify' for street maps
+ * - Set CONFIG.provider to 'esri' for FREE satellite imagery (RECOMMENDED)
+ * - Or 'mapbox' for satellite (requires credit card), or 'geoapify' for street maps
  * - Add zip codes to CONFIG.zipCodes array
  * - Run: node index.js
  *
@@ -23,16 +23,19 @@ const sharp = require('sharp');
 
 // ============ CONFIGURATION ============
 const CONFIG = {
-    // Provider options: 'mapbox' (satellite), 'geoapify' (street map)
-    provider: 'mapbox',
+    // Provider options:
+    // - 'esri' (FREE satellite, no credit card required) ⭐ RECOMMENDED
+    // - 'mapbox' (satellite, requires credit card for free tier)
+    // - 'geoapify' (street map, free)
+    provider: 'esri',
 
-    // API Keys
+    // API Keys (only needed for certain providers)
     geoapifyKey: 'bb4c8bd74f714b58909203373fed1f2a',
-    mapboxToken: 'YOUR_MAPBOX_TOKEN_HERE', // Get free token at https://www.mapbox.com/
+    mapboxToken: 'YOUR_MAPBOX_TOKEN_HERE', // Only if using mapbox
 
     // Map settings
     zipCodes: ['07030'],
-    zoom: 18, // Higher = more detail (max ~20-21 depending on provider)
+    zoom: 18, // Higher = more detail (max ~19 for ESRI, ~20-21 for Mapbox)
     tileSize: 256,
 
     // Mapbox style options: 'satellite-v9' (pure satellite), 'satellite-streets-v12' (satellite + labels)
@@ -79,8 +82,14 @@ const geocode = async (zipCode) => {
 // ============ TILE URL PROVIDERS ============
 const getTileUrl = (x, y, zoom) => {
     switch (CONFIG.provider) {
+        case 'esri':
+            // ESRI World Imagery - FREE, no API key required!
+            // Docs: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer
+            // Attribution: "Powered by Esri" (automatically added to console output)
+            return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
+
         case 'mapbox':
-            // Mapbox Static Tiles API
+            // Mapbox Static Tiles API (requires credit card for free tier)
             // Docs: https://docs.mapbox.com/api/maps/static-tiles/
             return `https://api.mapbox.com/v4/mapbox.${CONFIG.mapboxStyle}/${zoom}/${x}/${y}@2x.png?access_token=${CONFIG.mapboxToken}`;
 
@@ -181,6 +190,8 @@ const validateConfig = () => {
     if (CONFIG.provider === 'mapbox' && CONFIG.mapboxToken === 'YOUR_MAPBOX_TOKEN_HERE') {
         console.error('❌ Error: Please set your Mapbox token in CONFIG.mapboxToken');
         console.error('   Get a free token at: https://account.mapbox.com/access-tokens/');
+        console.error('   Note: Mapbox requires a credit card even for free tier');
+        console.error('   💡 Use provider: "esri" instead for truly free satellite imagery!');
         process.exit(1);
     }
     if (CONFIG.provider === 'geoapify' && !CONFIG.geoapifyKey) {
@@ -190,6 +201,12 @@ const validateConfig = () => {
     if (!CONFIG.zipCodes || CONFIG.zipCodes.length === 0) {
         console.error('❌ Error: Please add at least one zip code to CONFIG.zipCodes');
         process.exit(1);
+    }
+
+    // Show attribution for ESRI
+    if (CONFIG.provider === 'esri') {
+        console.log('📸 Using ESRI World Imagery (FREE satellite imagery)');
+        console.log('   Attribution: Powered by Esri\n');
     }
 };
 

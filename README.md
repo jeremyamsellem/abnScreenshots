@@ -4,11 +4,12 @@ Automatically capture high-definition satellite or street map images for zip cod
 
 ## Features
 
-- ✅ **Two providers**: Mapbox (satellite imagery) or Geoapify (street maps)
-- ✅ **High resolution**: Mapbox uses @2x tiles (512x512) for extra clarity
+- ✅ **100% FREE**: ESRI satellite imagery with NO credit card required!
+- ✅ **Three providers**: ESRI (satellite), Mapbox (satellite), or Geoapify (street maps)
+- ✅ **High resolution**: High-quality satellite imagery at zoom 18
 - ✅ **Batch processing**: Process multiple zip codes at once
 - ✅ **Automatic stitching**: Seamlessly combines tiles into one image
-- ✅ **Free tier friendly**: Mapbox offers 50,000 tiles/month free
+- ✅ **No API key needed**: ESRI requires zero setup
 
 ## Setup
 
@@ -18,32 +19,31 @@ Automatically capture high-definition satellite or street map images for zip cod
 npm install axios sharp
 ```
 
-### 2. Get API Keys
-
-#### For Mapbox (Satellite Imagery - Recommended)
-1. Go to https://account.mapbox.com/
-2. Sign up for a free account
-3. Navigate to "Access Tokens"
-4. Copy your default public token or create a new one
-5. Free tier: 50,000 tile requests/month
-
-#### For Geoapify (Street Maps)
-- Already configured with the existing API key
-- Free tier available
-
-### 3. Configure
+### 2. Configure (Optional - works out of the box!)
 
 Edit `index.js` and update the `CONFIG` object:
 
 ```javascript
 const CONFIG = {
-    provider: 'mapbox',  // or 'geoapify'
-    mapboxToken: 'YOUR_MAPBOX_TOKEN_HERE',  // Add your token here
+    provider: 'esri',  // FREE satellite imagery (no setup needed!)
     zipCodes: ['07030', '10001'],  // Add your zip codes
     zoom: 18,  // 18 = high detail, 15 = wider area
-    mapboxStyle: 'satellite-v9'  // or 'satellite-streets-v12' for labels
 };
 ```
+
+### 3. Optional API Keys (only if not using ESRI)
+
+#### For Mapbox (Satellite Imagery)
+⚠️ **Requires credit card** even for free tier
+1. Go to https://account.mapbox.com/
+2. Sign up and add credit card
+3. Navigate to "Access Tokens"
+4. Copy your default public token
+5. Free tier: 50,000 tile requests/month
+
+#### For Geoapify (Street Maps)
+- Already configured with the existing API key
+- Free tier available
 
 ## Usage
 
@@ -60,17 +60,18 @@ The tool will:
 
 ## Output Examples
 
-- `07030_mapbox_zoom18.png` - Hoboken, NJ in satellite view at zoom 18
+- `07030_esri_zoom18.png` - Hoboken, NJ in satellite view at zoom 18
 - `10001_geoapify_zoom16.png` - NYC in street map view at zoom 16
 
 ## Configuration Options
 
 ### Provider Options
 
-| Provider | Type | Resolution | Free Tier | Best For |
-|----------|------|------------|-----------|----------|
-| `mapbox` | Satellite | 512x512 @2x tiles | 50k/month | Aerial photography, satellite view |
-| `geoapify` | Street Map | 256x256 tiles | Varies | Street-level detail, roads |
+| Provider | Type | Resolution | Credit Card? | Best For |
+|----------|------|------------|--------------|----------|
+| **`esri`** ⭐ | Satellite | 256x256 tiles | ❌ NO | FREE satellite imagery, no limits |
+| `mapbox` | Satellite | 512x512 @2x tiles | ✅ YES (even for free tier) | Higher res, 50k tiles/month |
+| `geoapify` | Street Map | 256x256 tiles | ❌ NO | Street-level detail, roads |
 
 ### Zoom Levels
 
@@ -82,16 +83,22 @@ The tool will:
 
 Higher zoom = more detail but more tiles = more API calls
 
-### Mapbox Styles
+### Provider-Specific Settings
 
+#### ESRI (Recommended)
+- No configuration needed!
+- Just set `provider: 'esri'`
+
+#### Mapbox Styles (if using Mapbox)
 - `satellite-v9` - Pure satellite imagery (clean, no labels)
 - `satellite-streets-v12` - Satellite + street labels and roads
 
 ## Troubleshooting
 
-### "Invalid API key" Error
+### "Invalid API key" Error (Mapbox only)
 - Make sure you've replaced `YOUR_MAPBOX_TOKEN_HERE` with your actual token
 - Verify the token is active at https://account.mapbox.com/access-tokens/
+- **Or switch to ESRI**: Set `provider: 'esri'` for no API key needed!
 
 ### Image Quality Too Low
 - Increase the `zoom` level (try 19 or 20)
@@ -118,7 +125,8 @@ npm install axios sharp
 ## Example Output
 
 The generated images will show:
-- **Mapbox**: High-resolution satellite/aerial photography
+- **ESRI**: High-resolution satellite/aerial photography (FREE, unlimited!)
+- **Mapbox**: High-resolution satellite/aerial photography (requires credit card)
 - **Geoapify**: Detailed street maps with roads, buildings, labels
 
 Perfect for:
@@ -128,14 +136,15 @@ Perfect for:
 - Geographic research
 - Area visualization
 
-## API Usage Estimates
+## Usage Estimates
 
 For a typical zip code area at zoom 18:
 - Small zip code: ~20-50 tiles
 - Medium zip code: ~50-150 tiles
 - Large zip code: ~150-500 tiles
 
-Mapbox free tier (50,000 tiles/month) can handle ~100-2,500 zip codes depending on size.
+**ESRI**: No known rate limits - truly unlimited and free!
+**Mapbox** free tier (50,000 tiles/month): ~100-2,500 zip codes depending on size
 
 ## License
 
