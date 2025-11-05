@@ -42,7 +42,10 @@ const CONFIG = {
     geoapifyStyle: 'osm-carto',
 
     // Mapbox style options: 'satellite-v9' (pure satellite), 'satellite-streets-v12' (satellite + labels)
-    mapboxStyle: 'satellite-v9'
+    mapboxStyle: 'satellite-v9',
+
+    // Cache settings
+    dataFolder: './data' // Folder to cache downloaded tiles
 };
 
 // Mapbox @2x tiles are 512x512, regular tiles are 256x256
@@ -82,6 +85,29 @@ const geocode = async (zipCode) => {
     }
 };
 
+// ============ CACHE MANAGEMENT ============
+const ensureDataFolder = () => {
+    // Create main data folder
+    if (!fs.existsSync(CONFIG.dataFolder)) {
+        fs.mkdirSync(CONFIG.dataFolder, { recursive: true });
+        console.log(`📁 Created cache folder: ${CONFIG.dataFolder}`);
+    }
+
+    // Create provider-specific subfolder
+    const providerFolder = `${CONFIG.dataFolder}/${CONFIG.provider}_z${CONFIG.zoom}`;
+    if (!fs.existsSync(providerFolder)) {
+        fs.mkdirSync(providerFolder, { recursive: true });
+        console.log(`📁 Created cache subfolder: ${providerFolder}`);
+    }
+
+    return providerFolder;
+};
+
+const getTileCachePath = (x, y, zoom) => {
+    const providerFolder = `${CONFIG.dataFolder}/${CONFIG.provider}_z${zoom}`;
+    return `${providerFolder}/tile_${x}_${y}.png`;
+};
+
 // ============ TILE URL PROVIDERS ============
 const getTileUrl = (x, y, zoom) => {
     switch (CONFIG.provider) {
@@ -107,11 +133,39 @@ const getTileUrl = (x, y, zoom) => {
 };
 
 // ============ TILE DOWNLOADING ============
+// Cache statistics
+let cacheStats = { hits: 0, misses: 0 };
+
 const getMapTile = async (x, y, zoom) => {
+    const cachePath = getTileCachePath(x, y, zoom);
+
+    // Check if tile exists in cache
+    if (fs.existsSync(cachePath)) {
+        try {
+            cacheStats.hits++;
+            return fs.readFileSync(cachePath);
+        } catch (error) {
+            console.warn(`Cache read failed for tile ${zoom}/${x}/${y}, re-downloading...`);
+            // Continue to download if cache read fails
+        }
+    }
+
+    // Download tile from provider
+    cacheStats.misses++;
     const url = getTileUrl(x, y, zoom);
     try {
         const response = await axios.get(url, { responseType: 'arraybuffer' });
-        return response.data;
+        const tileData = response.data;
+
+        // Save to cache
+        try {
+            fs.writeFileSync(cachePath, tileData);
+        } catch (error) {
+            console.warn(`Failed to cache tile ${zoom}/${x}/${y}: ${error.message}`);
+            // Continue even if caching fails
+        }
+
+        return tileData;
     } catch (error) {
         console.error(`Failed to download tile ${zoom}/${x}/${y} from ${url}`);
         throw new Error(`Failed to download tile ${zoom}/${x}/${y}: ${error.message}`);
@@ -120,6 +174,9 @@ const getMapTile = async (x, y, zoom) => {
 
 // ============ MAIN PROCESSING ============
 const downloadAndStitchMaps = async () => {
+    // Ensure cache directory exists
+    ensureDataFolder();
+
     console.log(`\n🗺️  Map Provider: ${CONFIG.provider.toUpperCase()}`);
     console.log(`📍 Processing ${CONFIG.zipCodes.length} zip code(s) at zoom level ${CONFIG.zoom}\n`);
 
@@ -144,7 +201,11 @@ const downloadAndStitchMaps = async () => {
             const numTilesX = maxTileX - minTileX + 1;
             const numTilesY = maxTileY - minTileY + 1;
 
-            console.log(`Downloading ${numTilesX * numTilesY} tiles for ${zipCode}...`);
+            console.log(`Processing ${numTilesX * numTilesY} tiles for ${zipCode}...`);
+
+            // Reset cache stats for this zip code
+            const beforeHits = cacheStats.hits;
+            const beforeMisses = cacheStats.misses;
 
             const tilePromises = [];
             for (let y = minTileY; y <= maxTileY; y++) {
@@ -154,6 +215,14 @@ const downloadAndStitchMaps = async () => {
             }
 
             const tileBuffers = await Promise.all(tilePromises);
+
+            // Calculate cache stats for this zip code
+            const zipHits = cacheStats.hits - beforeHits;
+            const zipMisses = cacheStats.misses - beforeMisses;
+            const totalTiles = zipHits + zipMisses;
+            const cachePercent = totalTiles > 0 ? Math.round((zipHits / totalTiles) * 100) : 0;
+
+            console.log(`   💾 Cache: ${zipHits} from cache, ${zipMisses} downloaded (${cachePercent}% cached)`);
 
             const compositeOptions = [];
             for (let y = minTileY; y <= maxTileY; y++) {
