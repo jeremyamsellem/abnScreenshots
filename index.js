@@ -85,8 +85,8 @@ const CONFIG = {
     dataFolder: './data' // Folder to cache downloaded tiles
 };
 
-// Mapbox @2x tiles are 512x512, other providers use configured size
-const TILE_SIZE = CONFIG.provider === 'mapbox' ? 512 : CONFIG.tileSize;
+// Tile size - Geoapify and Mapbox support 512x512 (@2x), ESRI only supports 256x256
+const TILE_SIZE = CONFIG.provider === 'esri' ? 256 : CONFIG.tileSize;
 
 // Function to convert longitude and latitude to tile numbers
 function long2tile(lon, zoom) {
@@ -171,7 +171,9 @@ const getTileUrl = (x, y, zoom) => {
         case 'geoapify':
             // Geoapify Maps API (OpenStreetMap based)
             // Styles: osm-carto, osm-bright, osm-bright-grey, klokantech-basic, osm-liberty
-            return `https://maps.geoapify.com/v1/tile/${CONFIG.geoapifyStyle}/${zoom}/${x}/${y}.png?apiKey=${CONFIG.geoapifyKey}`;
+            // Use @2x for 512x512 tiles (scaleFactor=2)
+            const scaleFactor = CONFIG.tileSize === 512 ? '@2x' : '';
+            return `https://maps.geoapify.com/v1/tile/${CONFIG.geoapifyStyle}/${zoom}/${x}/${y}${scaleFactor}.png?apiKey=${CONFIG.geoapifyKey}`;
 
         default:
             throw new Error(`Unknown provider: ${CONFIG.provider}`);
@@ -431,7 +433,11 @@ const validateConfig = () => {
     // Show attribution for ESRI
     if (CONFIG.provider === 'esri') {
         console.log('📸 Using ESRI World Imagery (FREE satellite imagery)');
-        console.log('   Attribution: Powered by Esri\n');
+        console.log('   Attribution: Powered by Esri');
+        if (CONFIG.tileSize > 256) {
+            console.log('   ⚠️  Note: ESRI only supports 256x256 tiles, using 256x256 instead of ' + CONFIG.tileSize);
+        }
+        console.log('');
     }
 };
 
