@@ -322,12 +322,23 @@ const downloadAndStitchMaps = async () => {
                 }
                 const rowTileBuffers = await Promise.all(rowTilePromises);
 
+                // Ensure all tiles are exactly TILE_SIZE x TILE_SIZE (fixes spacing issues)
+                const processedTiles = await Promise.all(
+                    rowTileBuffers.map(buffer =>
+                        sharp(buffer)
+                            .resize(TILE_SIZE, TILE_SIZE, {
+                                fit: 'fill'  // Force exact dimensions without adding padding
+                            })
+                            .toBuffer()
+                    )
+                );
+
                 // Stitch tiles horizontally for this row
                 const rowCompositeOptions = [];
                 for (let x = minTileX; x <= maxTileX; x++) {
                     const i = x - minTileX;
                     rowCompositeOptions.push({
-                        input: rowTileBuffers[i],
+                        input: processedTiles[i],
                         left: i * TILE_SIZE,
                         top: 0,
                     });
@@ -362,10 +373,21 @@ const downloadAndStitchMaps = async () => {
             console.log(`   🔗 Stitching ${rowFiles.length} rows into final image...`);
 
             // Phase 2: Stitch all rows vertically to create final image
+            // Ensure each row is exactly the expected dimensions
+            const processedRows = await Promise.all(
+                rowFiles.map(rowPath =>
+                    sharp(rowPath)
+                        .resize(numTilesX * TILE_SIZE, TILE_SIZE, {
+                            fit: 'fill'  // Force exact dimensions
+                        })
+                        .toBuffer()
+                )
+            );
+
             const finalCompositeOptions = [];
-            for (let i = 0; i < rowFiles.length; i++) {
+            for (let i = 0; i < processedRows.length; i++) {
                 finalCompositeOptions.push({
-                    input: rowFiles[i],
+                    input: processedRows[i],
                     left: 0,
                     top: i * TILE_SIZE,
                 });
