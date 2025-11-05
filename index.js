@@ -3,7 +3,7 @@
  *
  * This tool captures high-definition map images for specified coordinate areas.
  * Uses a 3x3 grid pattern to ensure full coverage of the defined area.
- * Features disk-based recursive 2-by-2 stitching to handle very large maps without memory constraints.
+ * Features disk-based block stitching with recursive 2-by-2 merging to avoid Sharp's limitations.
  *
  * SETUP:
  * 1. Install dependencies: npm install axios sharp
@@ -16,14 +16,16 @@
  * - Set tileSize: 512 for higher quality (default)
  * - Run: node index.js
  *
- * STITCHING ALGORITHM:
- * - Phase 1: Tiles are stitched horizontally into rows
- * - Phase 2: Rows are stitched recursively 2-by-2 to create the final image
- * - Each intermediate result is written to disk to avoid memory limitations
+ * STITCHING ALGORITHM (3-Phase Block Approach):
+ * - Phase 1: Tiles are divided into 10x10 blocks, each block stitched and saved to disk
+ * - Phase 2: Blocks are stitched horizontally (recursively 2-by-2) into block rows
+ * - Phase 3: Block rows are stitched vertically (recursively 2-by-2) to create final image
+ * - All intermediate results written to disk to avoid Sharp's dimension/memory limits
  *
  * OUTPUT:
  * - High-resolution PNG files named: {areaName}_{provider}_zoom{zoom}.png
  * - Can handle extremely large maps (50,000+ tiles) with minimal memory usage
+ * - No Sharp limitations on image dimensions or composite operations
  */
 
 const axios = require('axios');
@@ -309,63 +311,89 @@ const downloadAndStitchMaps = async () => {
             const beforeHits = cacheStats.hits;
             const beforeMisses = cacheStats.misses;
 
-            // Create temp folder for row images
+            // Create temp folder for intermediate images
             const tempFolder = ensureTempFolder(area.name);
-            const rowFiles = [];
 
-            console.log(`   🔄 Stitching ${numTilesY} rows with ${numTilesX} tiles each...`);
+            // Define block size to avoid Sharp's limitations
+            // Process tiles in smaller blocks (e.g., 10x10 tiles per block)
+            const BLOCK_SIZE_TILES = 10;
+            const blockFiles = [];
 
-            // Phase 1: Stitch each row and save to disk
-            for (let y = minTileY; y <= maxTileY; y++) {
-                const rowIndex = y - minTileY;
-                console.log(`   📐 Processing row ${rowIndex + 1}/${numTilesY}...`);
+            console.log(`   🔄 Stitching ${numTilesX}x${numTilesY} tiles in blocks of ${BLOCK_SIZE_TILES}x${BLOCK_SIZE_TILES}...`);
 
-                // Download all tiles for this row
-                const rowTilePromises = [];
-                for (let x = minTileX; x <= maxTileX; x++) {
-                    rowTilePromises.push(getMapTile(x, y, CONFIG.zoom));
+            // Phase 1: Create blocks by stitching tiles in chunks
+            const numBlocksX = Math.ceil(numTilesX / BLOCK_SIZE_TILES);
+            const numBlocksY = Math.ceil(numTilesY / BLOCK_SIZE_TILES);
+            console.log(`   📦 Creating ${numBlocksX}x${numBlocksY} blocks...`);
+
+            for (let blockY = 0; blockY < numBlocksY; blockY++) {
+                for (let blockX = 0; blockX < numBlocksX; blockX++) {
+                    // Calculate tile range for this block
+                    const startTileX = minTileX + (blockX * BLOCK_SIZE_TILES);
+                    const endTileX = Math.min(startTileX + BLOCK_SIZE_TILES - 1, maxTileX);
+                    const startTileY = minTileY + (blockY * BLOCK_SIZE_TILES);
+                    const endTileY = Math.min(startTileY + BLOCK_SIZE_TILES - 1, maxTileY);
+
+                    const blockNumTilesX = endTileX - startTileX + 1;
+                    const blockNumTilesY = endTileY - startTileY + 1;
+
+                    console.log(`   🔨 Block ${blockY * numBlocksX + blockX + 1}/${numBlocksX * numBlocksY}: ${blockNumTilesX}x${blockNumTilesY} tiles...`);
+
+                    // Download all tiles for this block
+                    const blockTiles = [];
+                    for (let y = startTileY; y <= endTileY; y++) {
+                        for (let x = startTileX; x <= endTileX; x++) {
+                            blockTiles.push(getMapTile(x, y, CONFIG.zoom));
+                        }
+                    }
+                    const blockTileBuffers = await Promise.all(blockTiles);
+
+                    // Ensure all tiles are exactly TILE_SIZE x TILE_SIZE
+                    const processedTiles = await Promise.all(
+                        blockTileBuffers.map(buffer =>
+                            sharp(buffer)
+                                .resize(TILE_SIZE, TILE_SIZE, {
+                                    fit: 'fill'
+                                })
+                                .toBuffer()
+                        )
+                    );
+
+                    // Stitch tiles in this block
+                    const blockCompositeOptions = [];
+                    let tileIndex = 0;
+                    for (let y = startTileY; y <= endTileY; y++) {
+                        for (let x = startTileX; x <= endTileX; x++) {
+                            const localX = x - startTileX;
+                            const localY = y - startTileY;
+                            blockCompositeOptions.push({
+                                input: processedTiles[tileIndex++],
+                                left: localX * TILE_SIZE,
+                                top: localY * TILE_SIZE,
+                            });
+                        }
+                    }
+
+                    // Create block image
+                    const blockImage = await sharp({
+                        create: {
+                            width: blockNumTilesX * TILE_SIZE,
+                            height: blockNumTilesY * TILE_SIZE,
+                            channels: 4,
+                            background: { r: 0, g: 0, b: 0, alpha: 0 },
+                        },
+                    })
+                        .composite(blockCompositeOptions)
+                        .png()
+                        .toBuffer();
+
+                    // Save block to disk
+                    const blockFilePath = path.join(tempFolder, `block_${blockY}_${blockX}.png`);
+                    fs.writeFileSync(blockFilePath, blockImage);
+
+                    if (!blockFiles[blockY]) blockFiles[blockY] = [];
+                    blockFiles[blockY][blockX] = blockFilePath;
                 }
-                const rowTileBuffers = await Promise.all(rowTilePromises);
-
-                // Ensure all tiles are exactly TILE_SIZE x TILE_SIZE (fixes spacing issues)
-                const processedTiles = await Promise.all(
-                    rowTileBuffers.map(buffer =>
-                        sharp(buffer)
-                            .resize(TILE_SIZE, TILE_SIZE, {
-                                fit: 'fill'  // Force exact dimensions without adding padding
-                            })
-                            .toBuffer()
-                    )
-                );
-
-                // Stitch tiles horizontally for this row
-                const rowCompositeOptions = [];
-                for (let x = minTileX; x <= maxTileX; x++) {
-                    const i = x - minTileX;
-                    rowCompositeOptions.push({
-                        input: processedTiles[i],
-                        left: i * TILE_SIZE,
-                        top: 0,
-                    });
-                }
-
-                // Create row image
-                const rowImage = await sharp({
-                    create: {
-                        width: numTilesX * TILE_SIZE,
-                        height: TILE_SIZE,
-                        channels: 4,
-                        background: { r: 0, g: 0, b: 0, alpha: 0 },
-                    },
-                })
-                    .composite(rowCompositeOptions)
-                    .png()
-                    .toBuffer();
-
-                // Save row to disk
-                const rowFilePath = path.join(tempFolder, `row_${rowIndex}.png`);
-                fs.writeFileSync(rowFilePath, rowImage);
-                rowFiles.push(rowFilePath);
             }
 
             // Calculate cache stats for this area
@@ -375,10 +403,66 @@ const downloadAndStitchMaps = async () => {
             const cachePercent = totalTiles > 0 ? Math.round((areaHits / totalTiles) * 100) : 0;
 
             console.log(`   💾 Cache: ${areaHits} from cache, ${areaMisses} downloaded (${cachePercent}% cached)`);
-            console.log(`   🔗 Stitching ${rowFiles.length} rows into final image using recursive 2-by-2 approach...`);
+            console.log(`   🔗 Stitching ${numBlocksX}x${numBlocksY} blocks into final image using recursive 2-by-2 approach...`);
 
-            // Phase 2: Recursively stitch rows 2-by-2 to avoid Sharp's limitations
-            let currentFiles = rowFiles;
+            // Phase 2: First stitch blocks horizontally into rows
+            const blockRowFiles = [];
+            for (let blockY = 0; blockY < numBlocksY; blockY++) {
+                console.log(`   📐 Stitching block row ${blockY + 1}/${numBlocksY}...`);
+
+                let currentRowFiles = blockFiles[blockY];
+                let iteration = 0;
+
+                // Recursively stitch blocks in this row horizontally
+                while (currentRowFiles.length > 1) {
+                    iteration++;
+                    const nextFiles = [];
+
+                    for (let i = 0; i < currentRowFiles.length; i += 2) {
+                        if (i + 1 < currentRowFiles.length) {
+                            const file1 = currentRowFiles[i];
+                            const file2 = currentRowFiles[i + 1];
+
+                            const meta1 = await sharp(file1).metadata();
+                            const meta2 = await sharp(file2).metadata();
+
+                            const img1Buffer = await sharp(file1).toBuffer();
+                            const img2Buffer = await sharp(file2).toBuffer();
+
+                            // Stitch horizontally
+                            const stitched = await sharp({
+                                create: {
+                                    width: meta1.width + meta2.width,
+                                    height: meta1.height,
+                                    channels: 4,
+                                    background: { r: 0, g: 0, b: 0, alpha: 0 },
+                                },
+                            })
+                                .composite([
+                                    { input: img1Buffer, left: 0, top: 0 },
+                                    { input: img2Buffer, left: meta1.width, top: 0 }
+                                ])
+                                .png()
+                                .toBuffer();
+
+                            const stitchedPath = path.join(tempFolder, `row${blockY}_iter${iteration}_${Math.floor(i / 2)}.png`);
+                            fs.writeFileSync(stitchedPath, stitched);
+                            nextFiles.push(stitchedPath);
+                        } else {
+                            nextFiles.push(currentRowFiles[i]);
+                        }
+                    }
+
+                    currentRowFiles = nextFiles;
+                }
+
+                blockRowFiles.push(currentRowFiles[0]);
+            }
+
+            // Phase 3: Stitch the block rows vertically using 2-by-2 recursive approach
+            console.log(`   🔗 Stitching ${blockRowFiles.length} block rows vertically...`);
+
+            let currentFiles = blockRowFiles;
             let iteration = 0;
 
             while (currentFiles.length > 1) {
@@ -387,28 +471,22 @@ const downloadAndStitchMaps = async () => {
 
                 const nextFiles = [];
 
-                // Process pairs of files
                 for (let i = 0; i < currentFiles.length; i += 2) {
                     if (i + 1 < currentFiles.length) {
-                        // Stitch two files together
                         const file1 = currentFiles[i];
                         const file2 = currentFiles[i + 1];
 
-                        // Get metadata to determine height
                         const meta1 = await sharp(file1).metadata();
                         const meta2 = await sharp(file2).metadata();
-                        const combinedHeight = meta1.height + meta2.height;
-                        const width = meta1.width;
 
-                        // Load both images
                         const img1Buffer = await sharp(file1).toBuffer();
                         const img2Buffer = await sharp(file2).toBuffer();
 
                         // Stitch vertically
                         const stitched = await sharp({
                             create: {
-                                width: width,
-                                height: combinedHeight,
+                                width: meta1.width,
+                                height: meta1.height + meta2.height,
                                 channels: 4,
                                 background: { r: 0, g: 0, b: 0, alpha: 0 },
                             },
@@ -420,12 +498,10 @@ const downloadAndStitchMaps = async () => {
                             .png()
                             .toBuffer();
 
-                        // Save to temp file
-                        const stitchedPath = path.join(tempFolder, `iter${iteration}_${Math.floor(i / 2)}.png`);
+                        const stitchedPath = path.join(tempFolder, `final_iter${iteration}_${Math.floor(i / 2)}.png`);
                         fs.writeFileSync(stitchedPath, stitched);
                         nextFiles.push(stitchedPath);
                     } else {
-                        // Odd file out, carry it forward
                         nextFiles.push(currentFiles[i]);
                     }
                 }
