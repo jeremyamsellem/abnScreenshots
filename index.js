@@ -35,7 +35,7 @@ const CONFIG = {
     mapboxToken: 'YOUR_MAPBOX_TOKEN_HERE', // Only if using mapbox
 
     // Map settings
-    zipCodes: ['07030'],
+    zipCodes: ['90017'],
     zoom: 18, // Higher = more detail (max ~19 for ESRI, ~20-21 for Mapbox)
     tileSize: 256,
 
