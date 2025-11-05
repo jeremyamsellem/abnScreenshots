@@ -3,6 +3,7 @@
  *
  * This tool captures high-definition map images for specified coordinate areas.
  * Uses a 3x3 grid pattern to ensure full coverage of the defined area.
+ * Features disk-based stitching to handle very large maps without memory constraints.
  *
  * SETUP:
  * 1. Install dependencies: npm install axios sharp
@@ -12,15 +13,18 @@
  * - Set CONFIG.provider to 'geoapify' for street maps or 'esri' for satellite
  * - Define areas with two lat/lon points in CONFIG.areas array
  * - Set use3x3Grid: true to download center + 8 surrounding areas (recommended)
+ * - Set tileSize: 512 for higher quality (default)
  * - Run: node index.js
  *
  * OUTPUT:
  * - High-resolution PNG files named: {areaName}_{provider}_zoom{zoom}.png
+ * - Disk-based stitching allows for very large maps (50,000+ tiles)
  */
 
 const axios = require('axios');
 const fs = require('fs');
 const sharp = require('sharp');
+const path = require('path');
 
 // ============ CONFIGURATION ============
 const CONFIG = {
@@ -62,14 +66,14 @@ const CONFIG = {
     ],
 
     zoom: 18, // Higher = more detail (max ~19 for ESRI, ~20-21 for Mapbox)
-    tileSize: 256,
+    tileSize: 512, // Default tile size (512x512 for better quality)
 
     // Download 3x3 grid (center = defined area, 8 surrounding areas of same size)
     use3x3Grid: true,
 
-    // Maximum tiles to download (safety limit to prevent memory issues)
-    // Increase at your own risk if you have more RAM available
-    maxTiles: 5000,
+    // Maximum tiles to download (safety limit to prevent too many downloads)
+    // With disk-based stitching, memory is no longer a constraint
+    maxTiles: 50000,
 
     // Geoapify style options: 'osm-carto', 'osm-bright', 'osm-bright-grey', 'klokantech-basic', 'osm-liberty'
     geoapifyStyle: 'osm-carto',
@@ -81,7 +85,7 @@ const CONFIG = {
     dataFolder: './data' // Folder to cache downloaded tiles
 };
 
-// Mapbox @2x tiles are 512x512, regular tiles are 256x256
+// Mapbox @2x tiles are 512x512, other providers use configured size
 const TILE_SIZE = CONFIG.provider === 'mapbox' ? 512 : CONFIG.tileSize;
 
 // Function to convert longitude and latitude to tile numbers
@@ -129,6 +133,20 @@ const ensureDataFolder = () => {
     }
 
     return providerFolder;
+};
+
+const ensureTempFolder = (areaName) => {
+    const tempFolder = `${CONFIG.dataFolder}/temp_${areaName}`;
+    if (!fs.existsSync(tempFolder)) {
+        fs.mkdirSync(tempFolder, { recursive: true });
+    }
+    return tempFolder;
+};
+
+const cleanupTempFolder = (tempFolder) => {
+    if (fs.existsSync(tempFolder)) {
+        fs.rmSync(tempFolder, { recursive: true, force: true });
+    }
 };
 
 const getTileCachePath = (x, y, zoom) => {
@@ -235,26 +253,24 @@ const downloadAndStitchMaps = async () => {
 
             // Calculate total tile count with 3x3 grid
             const totalTileCount = CONFIG.use3x3Grid ? centerTileCount * 9 : centerTileCount;
-            const estimatedMemoryMB = Math.round((totalTileCount * TILE_SIZE * TILE_SIZE * 4) / (1024 * 1024));
+            const estimatedDiskMB = Math.round((totalTileCount * TILE_SIZE * TILE_SIZE * 4) / (1024 * 1024));
 
             // Safety check: prevent downloading too many tiles
             if (totalTileCount > CONFIG.maxTiles) {
                 console.error(`\n❌ ERROR: Area too large!`);
                 console.error(`   This area requires ${totalTileCount.toLocaleString()} tiles (${centerTileCount.toLocaleString()} center + ${CONFIG.use3x3Grid ? '8 surrounding areas' : 'no grid'})`);
                 console.error(`   Maximum allowed: ${CONFIG.maxTiles.toLocaleString()} tiles`);
-                console.error(`   Estimated memory needed: ~${estimatedMemoryMB}MB\n`);
+                console.error(`   Estimated disk space needed: ~${estimatedDiskMB}MB\n`);
                 console.error(`Solutions:`);
                 console.error(`   1. Reduce area size (move coordinates closer together)`);
                 console.error(`   2. Lower zoom level (try 15 or 16 instead of ${CONFIG.zoom})`);
                 console.error(`   3. Disable 3x3 grid: set use3x3Grid: false`);
-                console.error(`   4. Increase maxTiles limit (if you have enough RAM)`);
-                console.error(`\nExample of a reasonable area at zoom 18:`);
-                console.error(`   point1: { lat: 34.0522, lon: -118.2437 }`);
-                console.error(`   point2: { lat: 34.0622, lon: -118.2337 }  (about 1km x 1km)\n`);
+                console.error(`   4. Increase maxTiles limit in CONFIG`);
+                console.error(`\nNote: With disk-based stitching, memory is no longer a constraint!\n`);
                 process.exit(1);
             }
 
-            console.log(`   Estimated tiles: ${totalTileCount.toLocaleString()} (~${estimatedMemoryMB}MB memory)`);
+            console.log(`   Estimated tiles: ${totalTileCount.toLocaleString()} (~${estimatedDiskMB}MB disk space)`);
 
             // Expand to 3x3 grid if enabled
             let minTileX, maxTileX, minTileY, maxTileY;
@@ -286,14 +302,53 @@ const downloadAndStitchMaps = async () => {
             const beforeHits = cacheStats.hits;
             const beforeMisses = cacheStats.misses;
 
-            const tilePromises = [];
-            for (let y = minTileY; y <= maxTileY; y++) {
-                for (let x = minTileX; x <= maxTileX; x++) {
-                    tilePromises.push(getMapTile(x, y, CONFIG.zoom));
-                }
-            }
+            // Create temp folder for row images
+            const tempFolder = ensureTempFolder(area.name);
+            const rowFiles = [];
 
-            const tileBuffers = await Promise.all(tilePromises);
+            console.log(`   🔄 Stitching ${numTilesY} rows with ${numTilesX} tiles each...`);
+
+            // Phase 1: Stitch each row and save to disk
+            for (let y = minTileY; y <= maxTileY; y++) {
+                const rowIndex = y - minTileY;
+                console.log(`   📐 Processing row ${rowIndex + 1}/${numTilesY}...`);
+
+                // Download all tiles for this row
+                const rowTilePromises = [];
+                for (let x = minTileX; x <= maxTileX; x++) {
+                    rowTilePromises.push(getMapTile(x, y, CONFIG.zoom));
+                }
+                const rowTileBuffers = await Promise.all(rowTilePromises);
+
+                // Stitch tiles horizontally for this row
+                const rowCompositeOptions = [];
+                for (let x = minTileX; x <= maxTileX; x++) {
+                    const i = x - minTileX;
+                    rowCompositeOptions.push({
+                        input: rowTileBuffers[i],
+                        left: i * TILE_SIZE,
+                        top: 0,
+                    });
+                }
+
+                // Create row image
+                const rowImage = await sharp({
+                    create: {
+                        width: numTilesX * TILE_SIZE,
+                        height: TILE_SIZE,
+                        channels: 4,
+                        background: { r: 0, g: 0, b: 0, alpha: 0 },
+                    },
+                })
+                    .composite(rowCompositeOptions)
+                    .png()
+                    .toBuffer();
+
+                // Save row to disk
+                const rowFilePath = path.join(tempFolder, `row_${rowIndex}.png`);
+                fs.writeFileSync(rowFilePath, rowImage);
+                rowFiles.push(rowFilePath);
+            }
 
             // Calculate cache stats for this area
             const areaHits = cacheStats.hits - beforeHits;
@@ -302,20 +357,19 @@ const downloadAndStitchMaps = async () => {
             const cachePercent = totalTiles > 0 ? Math.round((areaHits / totalTiles) * 100) : 0;
 
             console.log(`   💾 Cache: ${areaHits} from cache, ${areaMisses} downloaded (${cachePercent}% cached)`);
+            console.log(`   🔗 Stitching ${rowFiles.length} rows into final image...`);
 
-            const compositeOptions = [];
-            for (let y = minTileY; y <= maxTileY; y++) {
-                for (let x = minTileX; x <= maxTileX; x++) {
-                    const i = (y - minTileY) * numTilesX + (x - minTileX);
-                    compositeOptions.push({
-                        input: tileBuffers[i],
-                        left: (x - minTileX) * TILE_SIZE,
-                        top: (y - minTileY) * TILE_SIZE,
-                    });
-                }
+            // Phase 2: Stitch all rows vertically to create final image
+            const finalCompositeOptions = [];
+            for (let i = 0; i < rowFiles.length; i++) {
+                finalCompositeOptions.push({
+                    input: rowFiles[i],
+                    left: 0,
+                    top: i * TILE_SIZE,
+                });
             }
 
-            const stitchedImage = await sharp({
+            const finalImage = await sharp({
                 create: {
                     width: numTilesX * TILE_SIZE,
                     height: numTilesY * TILE_SIZE,
@@ -323,12 +377,17 @@ const downloadAndStitchMaps = async () => {
                     background: { r: 0, g: 0, b: 0, alpha: 0 },
                 },
             })
-                .composite(compositeOptions)
+                .composite(finalCompositeOptions)
                 .png()
                 .toBuffer();
 
             const outputPath = `./${area.name}_${CONFIG.provider}_zoom${CONFIG.zoom}.png`;
-            fs.writeFileSync(outputPath, stitchedImage);
+            fs.writeFileSync(outputPath, finalImage);
+
+            // Clean up temporary row files
+            console.log(`   🧹 Cleaning up temporary files...`);
+            cleanupTempFolder(tempFolder);
+
             console.log(`✅ Map for ${area.name} saved to ${outputPath}`);
             console.log(`   Image size: ${numTilesX * TILE_SIZE}x${numTilesY * TILE_SIZE} pixels\n`);
         } catch (error) {
