@@ -38,11 +38,22 @@ const CONFIG = {
     // IMPORTANT: Keep areas small! At zoom 18, use ~0.01 degree difference (about 1km)
     areas: [
         {
-            name: 'downtown_la',
-            point1: { lat: 34.0422, lon: -118.2537 },  // Southwest corner
-            point2: { lat: 34.0522, lon: -118.2437 }   // Northeast corner (~1km x 1km)
-        }
-        // Add more areas as needed:
+            name: 'zone1',
+            point2: { lat: 34.06384, lon: -118.28422 },  // Southwest corner
+            point1: { lat: 34.03518, lon: -118.2389 }   // Northeast corner (~1km x 1km)
+//        },{
+//            name: 'zone2',
+//            point2: { lat: 34.02301, lon: -118.5085 },  // Southwest corner
+//            point1: { lat: 33.97149, lon: -118.43125 }   // Northeast corner (~1km x 1km)
+//        },{
+//            name: 'zone3',
+//            point2: { lat: 33.96409, lon: -118.39589 },  // Southwest corner
+//            point1: { lat: 33.89971, lon: -118.32585 }   // Northeast corner (~1km x 1km)
+//        },{
+//            name: 'zone4',
+//            point2: { lat: 34.07715, lon: -118.42067 },  // Southwest corner
+//            point1: { lat: 34.05731, lon: -118.38806 }   // Northeast corner (~1km x 1km)
+        }        // Add more areas as needed:
         // {
         //     name: 'santa_monica',
         //     point1: { lat: 34.014, lon: -118.505 },
