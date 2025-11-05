@@ -3,7 +3,7 @@
  *
  * This tool captures high-definition map images for specified coordinate areas.
  * Uses a 3x3 grid pattern to ensure full coverage of the defined area.
- * Features disk-based stitching to handle very large maps without memory constraints.
+ * Features disk-based recursive 2-by-2 stitching to handle very large maps without memory constraints.
  *
  * SETUP:
  * 1. Install dependencies: npm install axios sharp
@@ -16,9 +16,14 @@
  * - Set tileSize: 512 for higher quality (default)
  * - Run: node index.js
  *
+ * STITCHING ALGORITHM:
+ * - Phase 1: Tiles are stitched horizontally into rows
+ * - Phase 2: Rows are stitched recursively 2-by-2 to create the final image
+ * - Each intermediate result is written to disk to avoid memory limitations
+ *
  * OUTPUT:
  * - High-resolution PNG files named: {areaName}_{provider}_zoom{zoom}.png
- * - Disk-based stitching allows for very large maps (50,000+ tiles)
+ * - Can handle extremely large maps (50,000+ tiles) with minimal memory usage
  */
 
 const axios = require('axios');
@@ -370,43 +375,70 @@ const downloadAndStitchMaps = async () => {
             const cachePercent = totalTiles > 0 ? Math.round((areaHits / totalTiles) * 100) : 0;
 
             console.log(`   💾 Cache: ${areaHits} from cache, ${areaMisses} downloaded (${cachePercent}% cached)`);
-            console.log(`   🔗 Stitching ${rowFiles.length} rows into final image...`);
+            console.log(`   🔗 Stitching ${rowFiles.length} rows into final image using recursive 2-by-2 approach...`);
 
-            // Phase 2: Stitch all rows vertically to create final image
-            // Ensure each row is exactly the expected dimensions
-            const processedRows = await Promise.all(
-                rowFiles.map(rowPath =>
-                    sharp(rowPath)
-                        .resize(numTilesX * TILE_SIZE, TILE_SIZE, {
-                            fit: 'fill'  // Force exact dimensions
+            // Phase 2: Recursively stitch rows 2-by-2 to avoid Sharp's limitations
+            let currentFiles = rowFiles;
+            let iteration = 0;
+
+            while (currentFiles.length > 1) {
+                iteration++;
+                console.log(`   📦 Iteration ${iteration}: Stitching ${currentFiles.length} files into ${Math.ceil(currentFiles.length / 2)}...`);
+
+                const nextFiles = [];
+
+                // Process pairs of files
+                for (let i = 0; i < currentFiles.length; i += 2) {
+                    if (i + 1 < currentFiles.length) {
+                        // Stitch two files together
+                        const file1 = currentFiles[i];
+                        const file2 = currentFiles[i + 1];
+
+                        // Get metadata to determine height
+                        const meta1 = await sharp(file1).metadata();
+                        const meta2 = await sharp(file2).metadata();
+                        const combinedHeight = meta1.height + meta2.height;
+                        const width = meta1.width;
+
+                        // Load both images
+                        const img1Buffer = await sharp(file1).toBuffer();
+                        const img2Buffer = await sharp(file2).toBuffer();
+
+                        // Stitch vertically
+                        const stitched = await sharp({
+                            create: {
+                                width: width,
+                                height: combinedHeight,
+                                channels: 4,
+                                background: { r: 0, g: 0, b: 0, alpha: 0 },
+                            },
                         })
-                        .toBuffer()
-                )
-            );
+                            .composite([
+                                { input: img1Buffer, left: 0, top: 0 },
+                                { input: img2Buffer, left: 0, top: meta1.height }
+                            ])
+                            .png()
+                            .toBuffer();
 
-            const finalCompositeOptions = [];
-            for (let i = 0; i < processedRows.length; i++) {
-                finalCompositeOptions.push({
-                    input: processedRows[i],
-                    left: 0,
-                    top: i * TILE_SIZE,
-                });
+                        // Save to temp file
+                        const stitchedPath = path.join(tempFolder, `iter${iteration}_${Math.floor(i / 2)}.png`);
+                        fs.writeFileSync(stitchedPath, stitched);
+                        nextFiles.push(stitchedPath);
+                    } else {
+                        // Odd file out, carry it forward
+                        nextFiles.push(currentFiles[i]);
+                    }
+                }
+
+                currentFiles = nextFiles;
             }
 
-            const finalImage = await sharp({
-                create: {
-                    width: numTilesX * TILE_SIZE,
-                    height: numTilesY * TILE_SIZE,
-                    channels: 4,
-                    background: { r: 0, g: 0, b: 0, alpha: 0 },
-                },
-            })
-                .composite(finalCompositeOptions)
-                .png()
-                .toBuffer();
-
+            // The final file is the last remaining file
+            const finalFilePath = currentFiles[0];
             const outputPath = `./${area.name}_${CONFIG.provider}_zoom${CONFIG.zoom}.png`;
-            fs.writeFileSync(outputPath, finalImage);
+
+            // Copy final file to output location
+            fs.copyFileSync(finalFilePath, outputPath);
 
             // Clean up temporary row files
             console.log(`   🧹 Cleaning up temporary files...`);
