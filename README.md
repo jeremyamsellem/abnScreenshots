@@ -52,6 +52,24 @@ const CONFIG = {
 - Use Google Maps: Right-click on a location → Click the coordinates to copy
 - Or use any other mapping service that displays lat/lon
 
+**⚠️ IMPORTANT - Area Size Limits:**
+- At **zoom 18**, keep areas to **~0.01° difference** (about 1km x 1km)
+- At **zoom 16**, you can use **~0.05° difference** (about 5km x 5km)
+- At **zoom 14**, you can use **~0.2° difference** (about 20km x 20km)
+- Default limit: **5,000 tiles** maximum
+- Too large = Out of memory error!
+
+**Example safe areas at zoom 18:**
+```javascript
+// Good: ~1km x 1km (about 400 tiles with 3x3 grid)
+point1: { lat: 34.0422, lon: -118.2537 }
+point2: { lat: 34.0522, lon: -118.2437 }
+
+// Bad: ~20km x 31km (150,000+ tiles - will crash!)
+point1: { lat: 34.0853, lon: -118.5081 }
+point2: { lat: 33.9008, lon: -118.2290 }
+```
+
 ## How the 3x3 Grid Works
 
 The tool downloads a 3×3 grid pattern where:
@@ -132,6 +150,33 @@ Higher zoom = more detail but more tiles = more API calls
 - Make sure you've replaced `YOUR_MAPBOX_TOKEN_HERE` with your actual token
 - Verify the token is active at https://account.mapbox.com/access-tokens/
 - **Or switch to ESRI**: Set `provider: 'esri'` for no API key needed!
+
+### Out of Memory Error / "Area too large" Error
+**This happens when your area is too big for the zoom level!**
+
+The tool will show you how many tiles you're trying to download. Solutions:
+
+1. **Reduce area size** (Best solution):
+   ```javascript
+   // At zoom 18, keep areas to ~0.01° difference (about 1km)
+   point1: { lat: 34.0422, lon: -118.2537 }
+   point2: { lat: 34.0522, lon: -118.2437 }
+   ```
+
+2. **Lower zoom level**:
+   ```javascript
+   zoom: 16,  // Instead of 18
+   ```
+
+3. **Disable 3x3 grid** (covers less area):
+   ```javascript
+   use3x3Grid: false,
+   ```
+
+4. **Increase tile limit** (if you have lots of RAM):
+   ```javascript
+   maxTiles: 10000,  // Default is 5000
+   ```
 
 ### Image Doesn't Cover Full Area
 - **Enable 3x3 grid**: Set `use3x3Grid: true` (should already be enabled by default)

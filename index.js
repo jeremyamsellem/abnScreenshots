@@ -35,17 +35,18 @@ const CONFIG = {
     mapboxToken: 'YOUR_MAPBOX_TOKEN_HERE', // Only if using mapbox
 
     // Map areas - Define areas using two lat/lon points (southwest and northeast corners)
+    // IMPORTANT: Keep areas small! At zoom 18, use ~0.01 degree difference (about 1km)
     areas: [
         {
-            name: 'downtown',
-            point1: { lat: 40.7489, lon: -73.9680 },  // Southwest corner
-            point2: { lat: 40.7589, lon: -73.9580 }   // Northeast corner
+            name: 'downtown_la',
+            point1: { lat: 34.0422, lon: -118.2537 },  // Southwest corner
+            point2: { lat: 34.0522, lon: -118.2437 }   // Northeast corner (~1km x 1km)
         }
         // Add more areas as needed:
         // {
-        //     name: 'central_park',
-        //     point1: { lat: 40.764, lon: -73.973 },
-        //     point2: { lat: 40.800, lon: -73.949 }
+        //     name: 'santa_monica',
+        //     point1: { lat: 34.014, lon: -118.505 },
+        //     point2: { lat: 34.024, lon: -118.495 }
         // }
     ],
 
@@ -54,6 +55,10 @@ const CONFIG = {
 
     // Download 3x3 grid (center = defined area, 8 surrounding areas of same size)
     use3x3Grid: true,
+
+    // Maximum tiles to download (safety limit to prevent memory issues)
+    // Increase at your own risk if you have more RAM available
+    maxTiles: 5000,
 
     // Geoapify style options: 'osm-carto', 'osm-bright', 'osm-bright-grey', 'klokantech-basic', 'osm-liberty'
     geoapifyStyle: 'osm-carto',
@@ -156,8 +161,32 @@ const downloadAndStitchMaps = async () => {
 
             const centerNumTilesX = centerMaxTileX - centerMinTileX + 1;
             const centerNumTilesY = centerMaxTileY - centerMinTileY + 1;
+            const centerTileCount = centerNumTilesX * centerNumTilesY;
 
             console.log(`Center area: X[${centerMinTileX} to ${centerMaxTileX}] (${centerNumTilesX} tiles), Y[${centerMinTileY} to ${centerMaxTileY}] (${centerNumTilesY} tiles)`);
+
+            // Calculate total tile count with 3x3 grid
+            const totalTileCount = CONFIG.use3x3Grid ? centerTileCount * 9 : centerTileCount;
+            const estimatedMemoryMB = Math.round((totalTileCount * TILE_SIZE * TILE_SIZE * 4) / (1024 * 1024));
+
+            // Safety check: prevent downloading too many tiles
+            if (totalTileCount > CONFIG.maxTiles) {
+                console.error(`\n❌ ERROR: Area too large!`);
+                console.error(`   This area requires ${totalTileCount.toLocaleString()} tiles (${centerTileCount.toLocaleString()} center + ${CONFIG.use3x3Grid ? '8 surrounding areas' : 'no grid'})`);
+                console.error(`   Maximum allowed: ${CONFIG.maxTiles.toLocaleString()} tiles`);
+                console.error(`   Estimated memory needed: ~${estimatedMemoryMB}MB\n`);
+                console.error(`Solutions:`);
+                console.error(`   1. Reduce area size (move coordinates closer together)`);
+                console.error(`   2. Lower zoom level (try 15 or 16 instead of ${CONFIG.zoom})`);
+                console.error(`   3. Disable 3x3 grid: set use3x3Grid: false`);
+                console.error(`   4. Increase maxTiles limit (if you have enough RAM)`);
+                console.error(`\nExample of a reasonable area at zoom 18:`);
+                console.error(`   point1: { lat: 34.0522, lon: -118.2437 }`);
+                console.error(`   point2: { lat: 34.0622, lon: -118.2337 }  (about 1km x 1km)\n`);
+                process.exit(1);
+            }
+
+            console.log(`   Estimated tiles: ${totalTileCount.toLocaleString()} (~${estimatedMemoryMB}MB memory)`);
 
             // Expand to 3x3 grid if enabled
             let minTileX, maxTileX, minTileY, maxTileY;
