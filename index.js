@@ -22,6 +22,10 @@ const axios = require('axios');
 const fs = require('fs');
 const sharp = require('sharp');
 
+// Configure Sharp for large images
+sharp.cache(false); // Disable cache for large images
+sharp.concurrency(1); // Process one image at a time to reduce memory usage
+
 // ============ CONFIGURATION ============
 const CONFIG = {
     // Provider options:
@@ -59,6 +63,10 @@ const CONFIG = {
     // Maximum tiles to download (safety limit to prevent memory issues)
     // Increase at your own risk if you have more RAM available
     maxTiles: 5000,
+
+    // Maximum pixels in final stitched image (safety limit for Sharp library)
+    // 500MP = ~22,361 x 22,361 pixels. Increase if you have more RAM.
+    maxPixels: 500_000_000, // 500 megapixels
 
     // Geoapify style options: 'osm-carto', 'osm-bright', 'osm-bright-grey', 'klokantech-basic', 'osm-liberty'
     geoapifyStyle: 'osm-carto',
@@ -292,6 +300,30 @@ const downloadAndStitchMaps = async () => {
 
             console.log(`   💾 Cache: ${areaHits} from cache, ${areaMisses} downloaded (${cachePercent}% cached)`);
 
+            // Calculate final image dimensions
+            const finalWidth = numTilesX * TILE_SIZE;
+            const finalHeight = numTilesY * TILE_SIZE;
+            const totalPixels = finalWidth * finalHeight;
+
+            console.log(`   🖼️  Stitching image: ${finalWidth}x${finalHeight} pixels (${Math.round(totalPixels / 1_000_000)}MP)`);
+
+            // Validate image size before attempting to create it
+            if (totalPixels > CONFIG.maxPixels) {
+                console.error(`\n❌ ERROR: Final image too large!`);
+                console.error(`   Image size: ${finalWidth}x${finalHeight} = ${Math.round(totalPixels / 1_000_000)} megapixels`);
+                console.error(`   Maximum allowed: ${Math.round(CONFIG.maxPixels / 1_000_000)} megapixels\n`);
+                console.error(`Solutions:`);
+                console.error(`   1. Lower zoom level (try 15, 16, or 17 instead of ${CONFIG.zoom})`);
+                console.error(`   2. Make area smaller (reduce distance between coordinates)`);
+                console.error(`   3. Disable 3x3 grid: set use3x3Grid: false`);
+                console.error(`   4. Increase maxPixels in CONFIG (if you have enough RAM)`);
+                console.error(`\nCurrent configuration:`);
+                console.error(`   Tiles: ${numTilesX} x ${numTilesY} = ${numTilesX * numTilesY} tiles`);
+                console.error(`   Tile size: ${TILE_SIZE}x${TILE_SIZE} pixels`);
+                console.error(`   Final image: ${finalWidth}x${finalHeight} pixels\n`);
+                throw new Error('Image exceeds pixel limit');
+            }
+
             const compositeOptions = [];
             for (let y = minTileY; y <= maxTileY; y++) {
                 for (let x = minTileX; x <= maxTileX; x++) {
@@ -306,11 +338,13 @@ const downloadAndStitchMaps = async () => {
 
             const stitchedImage = await sharp({
                 create: {
-                    width: numTilesX * TILE_SIZE,
-                    height: numTilesY * TILE_SIZE,
+                    width: finalWidth,
+                    height: finalHeight,
                     channels: 4,
                     background: { r: 0, g: 0, b: 0, alpha: 0 },
                 },
+            }, {
+                limitInputPixels: CONFIG.maxPixels // Increase Sharp's pixel limit
             })
                 .composite(compositeOptions)
                 .png()
