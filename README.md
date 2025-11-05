@@ -1,14 +1,15 @@
 # High-Resolution Map Capture Tool
 
-Automatically capture high-definition satellite or street map images for zip codes by stitching together map tiles.
+Automatically capture high-definition satellite or street map images for custom geographic areas by stitching together map tiles.
 
 ## Features
 
 - ✅ **100% FREE**: No credit card required for street maps or satellite imagery!
+- ✅ **Custom Areas**: Define exact areas using two lat/lon coordinate points
 - ✅ **3x3 Grid Coverage**: Downloads center area + 8 surrounding areas for complete coverage
 - ✅ **Three providers**: Geoapify (street maps), ESRI (satellite), or Mapbox (satellite)
 - ✅ **High resolution**: High-quality imagery at zoom 18
-- ✅ **Batch processing**: Process multiple zip codes at once
+- ✅ **Batch processing**: Process multiple areas at once
 - ✅ **Automatic stitching**: Seamlessly combines tiles into one image
 - ✅ **No API key needed**: Works out of the box!
 
@@ -20,29 +21,47 @@ Automatically capture high-definition satellite or street map images for zip cod
 npm install axios sharp
 ```
 
-### 2. Configure (Optional - works out of the box!)
+### 2. Configure Your Areas
 
-Edit `index.js` and update the `CONFIG` object:
+Edit `index.js` and define your areas using two lat/lon coordinate points:
 
 ```javascript
 const CONFIG = {
     provider: 'geoapify',  // Street maps (or 'esri' for satellite)
-    zipCodes: ['07030', '10001'],  // Add your zip codes
+
+    // Define areas using two points (opposite corners of a rectangle)
+    areas: [
+        {
+            name: 'downtown',
+            point1: { lat: 40.7489, lon: -73.9680 },  // Southwest corner
+            point2: { lat: 40.7589, lon: -73.9580 }   // Northeast corner
+        },
+        {
+            name: 'central_park',
+            point1: { lat: 40.764, lon: -73.973 },
+            point2: { lat: 40.800, lon: -73.949 }
+        }
+    ],
+
     zoom: 18,  // 18 = high detail, 15 = wider area
     use3x3Grid: true,  // Download center + 8 surrounding areas (recommended!)
 };
 ```
+
+**How to get coordinates:**
+- Use Google Maps: Right-click on a location → Click the coordinates to copy
+- Or use any other mapping service that displays lat/lon
 
 ## How the 3x3 Grid Works
 
 The tool downloads a 3×3 grid pattern where:
 ```
 [Area] [Area] [Area]
-[Area] [ZIP]  [Area]  ← ZIP = your zip code area
+[Area] [Your] [Area]  ← Your = the area between your two points
 [Area] [Area] [Area]
 ```
 
-Each area has the same width and height as the zip code's bounding box, ensuring complete coverage of the entire region and surrounding context.
+Each surrounding area has the same width and height as your defined area, ensuring complete coverage of the entire region and surrounding context.
 
 ### 3. Optional API Keys (only if not using ESRI)
 
@@ -65,16 +84,17 @@ node index.js
 ```
 
 The tool will:
-1. Geocode each zip code to get coordinates
+1. Create bounding box from your two coordinate points
 2. Calculate required map tiles for the area
-3. Download all tiles in parallel
-4. Stitch them together into a single high-resolution PNG
-5. Save as `{zipCode}_{provider}_zoom{zoom}.png`
+3. Expand to 3x3 grid pattern (if enabled)
+4. Download all tiles in parallel
+5. Stitch them together into a single high-resolution PNG
+6. Save as `{areaName}_{provider}_zoom{zoom}.png`
 
 ## Output Examples
 
-- `07030_esri_zoom18.png` - Hoboken, NJ in satellite view at zoom 18
-- `10001_geoapify_zoom16.png` - NYC in street map view at zoom 16
+- `downtown_geoapify_zoom18.png` - Downtown area in street map view at zoom 18
+- `central_park_esri_zoom16.png` - Central Park in satellite view at zoom 16
 
 ## Configuration Options
 
@@ -113,8 +133,9 @@ Higher zoom = more detail but more tiles = more API calls
 - Verify the token is active at https://account.mapbox.com/access-tokens/
 - **Or switch to ESRI**: Set `provider: 'esri'` for no API key needed!
 
-### Image Doesn't Cover Full Zip Code Area
+### Image Doesn't Cover Full Area
 - **Enable 3x3 grid**: Set `use3x3Grid: true` (should already be enabled by default)
+- **Expand area**: Move your two coordinate points further apart
 - **Lower `zoom` level**: Try zoom 17 or 16 for wider coverage per tile
 - **Check the logs**: The console shows the center area and full grid coverage
 
@@ -130,7 +151,8 @@ zoom: 17,          // Wider area per tile
 
 ### Too Many Tiles / Rate Limit
 - Reduce the `zoom` level
-- Process fewer zip codes at once
+- Process fewer areas at once
+- Define smaller areas (closer coordinate points)
 - Mapbox free tier: 50,000 tiles/month
 
 ### Missing Dependencies
@@ -140,10 +162,10 @@ npm install axios sharp
 
 ## How It Works
 
-1. **Geocoding**: Converts zip code to lat/lon coordinates and bounding box
-2. **Tile Calculation**: Determines which map tiles cover the zip code area
+1. **Bounding Box Creation**: Creates rectangular area from your two coordinate points
+2. **Tile Calculation**: Determines which map tiles cover the defined area
 3. **3x3 Grid Expansion**: Extends coverage to include 8 surrounding areas of equal size
-4. **Parallel Download**: Fetches all tiles simultaneously (9x the zip code area)
+4. **Parallel Download**: Fetches all tiles simultaneously (9x your defined area)
 5. **Stitching**: Uses Sharp library to composite all tiles into one seamless image
 6. **Output**: Saves high-resolution PNG with complete coverage
 
@@ -163,16 +185,22 @@ Perfect for:
 
 ## Usage Estimates
 
-For a typical zip code area at zoom 18 with 3x3 grid enabled:
-- Small zip code: ~180-450 tiles (9x coverage)
-- Medium zip code: ~450-1,350 tiles (9x coverage)
-- Large zip code: ~1,350-4,500 tiles (9x coverage)
+For a typical area at zoom 18 with 3x3 grid enabled:
+- Small area (0.01° x 0.01°): ~180-450 tiles (9x coverage)
+- Medium area (0.02° x 0.02°): ~450-1,350 tiles (9x coverage)
+- Large area (0.05° x 0.05°): ~1,350-4,500 tiles (9x coverage)
 
 **Note**: 3x3 grid downloads 9x more tiles (center + 8 surrounding areas) to ensure complete coverage.
 
-**Geoapify** (street maps): Free tier available
-**ESRI** (satellite): No known rate limits - truly unlimited and free!
-**Mapbox** free tier (50,000 tiles/month): ~11-370 zip codes depending on size with 3x3 grid
+**Tile count depends on:**
+- Distance between your two coordinate points
+- Zoom level (higher = more tiles)
+- Whether 3x3 grid is enabled
+
+**Provider limits:**
+- **Geoapify** (street maps): Free tier available
+- **ESRI** (satellite): No known rate limits - truly unlimited and free!
+- **Mapbox** free tier: 50,000 tiles/month (~11-370 areas with 3x3 grid)
 
 ## License
 

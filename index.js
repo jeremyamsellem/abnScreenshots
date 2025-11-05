@@ -1,8 +1,8 @@
 /**
  * High-Resolution Map Capture Tool
  *
- * This tool captures high-definition map images for specified zip codes.
- * Uses a 3x3 grid pattern to ensure full coverage of the zip code area.
+ * This tool captures high-definition map images for specified coordinate areas.
+ * Uses a 3x3 grid pattern to ensure full coverage of the defined area.
  *
  * SETUP:
  * 1. Install dependencies: npm install axios sharp
@@ -10,12 +10,12 @@
  *
  * USAGE:
  * - Set CONFIG.provider to 'geoapify' for street maps or 'esri' for satellite
- * - Add zip codes to CONFIG.zipCodes array
+ * - Define areas with two lat/lon points in CONFIG.areas array
  * - Set use3x3Grid: true to download center + 8 surrounding areas (recommended)
  * - Run: node index.js
  *
  * OUTPUT:
- * - High-resolution PNG files named: {zipCode}_{provider}_zoom{zoom}.png
+ * - High-resolution PNG files named: {areaName}_{provider}_zoom{zoom}.png
  */
 
 const axios = require('axios');
@@ -34,12 +34,25 @@ const CONFIG = {
     geoapifyKey: 'bb4c8bd74f714b58909203373fed1f2a',
     mapboxToken: 'YOUR_MAPBOX_TOKEN_HERE', // Only if using mapbox
 
-    // Map settings
-    zipCodes: ['90017'],
+    // Map areas - Define areas using two lat/lon points (southwest and northeast corners)
+    areas: [
+        {
+            name: 'downtown',
+            point1: { lat: 40.7489, lon: -73.9680 },  // Southwest corner
+            point2: { lat: 40.7589, lon: -73.9580 }   // Northeast corner
+        }
+        // Add more areas as needed:
+        // {
+        //     name: 'central_park',
+        //     point1: { lat: 40.764, lon: -73.973 },
+        //     point2: { lat: 40.800, lon: -73.949 }
+        // }
+    ],
+
     zoom: 18, // Higher = more detail (max ~19 for ESRI, ~20-21 for Mapbox)
     tileSize: 256,
 
-    // Download 3x3 grid (center = zip code, 8 surrounding areas of same size)
+    // Download 3x3 grid (center = defined area, 8 surrounding areas of same size)
     use3x3Grid: true,
 
     // Geoapify style options: 'osm-carto', 'osm-bright', 'osm-bright-grey', 'klokantech-basic', 'osm-liberty'
@@ -69,21 +82,16 @@ function lat2tile(lat, zoom) {
   );
 }
 
-// ============ GEOCODING ============
-const geocode = async (zipCode) => {
-    try {
-        const response = await axios.get(`https://api.geoapify.com/v1/geocode/search?text=${zipCode}&type=postcode&apiKey=${CONFIG.geoapifyKey}`);
-        if (response.data.features.length === 0) {
-            throw new Error('No results found');
-        }
-        const { lon, lat, bbox } = response.data.features[0].properties;
-        return { lon, lat, bbox };
-    } catch (error) {
-        if (error.response && error.response.status === 401) {
-            throw new Error('Invalid API key');
-        }
-        throw new Error(`Geocoding failed for ${zipCode}: ${error.message}`);
-    }
+// ============ BOUNDING BOX CREATION ============
+const createBoundingBox = (point1, point2) => {
+    // Create bounding box from two points
+    // bbox format: [minLon, minLat, maxLon, maxLat]
+    const minLon = Math.min(point1.lon, point2.lon);
+    const maxLon = Math.max(point1.lon, point2.lon);
+    const minLat = Math.min(point1.lat, point2.lat);
+    const maxLat = Math.max(point1.lat, point2.lat);
+
+    return [minLon, minLat, maxLon, maxLat];
 };
 
 // ============ TILE URL PROVIDERS ============
@@ -125,25 +133,22 @@ const getMapTile = async (x, y, zoom) => {
 // ============ MAIN PROCESSING ============
 const downloadAndStitchMaps = async () => {
     console.log(`\n🗺️  Map Provider: ${CONFIG.provider.toUpperCase()}`);
-    console.log(`📍 Processing ${CONFIG.zipCodes.length} zip code(s) at zoom level ${CONFIG.zoom}\n`);
+    console.log(`📍 Processing ${CONFIG.areas.length} area(s) at zoom level ${CONFIG.zoom}\n`);
 
-    for (const zipCode of CONFIG.zipCodes) {
+    for (const area of CONFIG.areas) {
         try {
-            console.log(`Processing ${zipCode}...`);
-            let { bbox, lon, lat } = await geocode(zipCode);
+            console.log(`Processing area: ${area.name}...`);
 
-            if (!bbox || !Array.isArray(bbox) || bbox.length !== 4) {
-                console.warn(`Warning: Bounding box not found for ${zipCode}. Creating a default one.`);
-                const halfSide = 0.005; // Roughly 0.5km in degrees
-                bbox = [lon - halfSide, lat - halfSide, lon + halfSide, lat + halfSide];
-            }
-
+            // Create bounding box from the two points
+            const bbox = createBoundingBox(area.point1, area.point2);
             const [minLon, minLat, maxLon, maxLat] = bbox;
 
-            // Log original bounding box
-            console.log(`Zip code bbox: [${minLon.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLon.toFixed(6)}, ${maxLat.toFixed(6)}]`);
+            // Log bounding box
+            console.log(`Area bbox: [${minLon.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLon.toFixed(6)}, ${maxLat.toFixed(6)}]`);
+            console.log(`  Point 1: (${area.point1.lat}, ${area.point1.lon})`);
+            console.log(`  Point 2: (${area.point2.lat}, ${area.point2.lon})`);
 
-            // Calculate tile range for the original zip code area
+            // Calculate tile range for the defined area
             const centerMinTileX = long2tile(minLon, CONFIG.zoom);
             const centerMaxTileX = long2tile(maxLon, CONFIG.zoom);
             const centerMinTileY = lat2tile(maxLat, CONFIG.zoom);
@@ -213,12 +218,12 @@ const downloadAndStitchMaps = async () => {
                 .png()
                 .toBuffer();
 
-            const outputPath = `./${zipCode}_${CONFIG.provider}_zoom${CONFIG.zoom}.png`;
+            const outputPath = `./${area.name}_${CONFIG.provider}_zoom${CONFIG.zoom}.png`;
             fs.writeFileSync(outputPath, stitchedImage);
-            console.log(`✅ Map for ${zipCode} saved to ${outputPath}`);
+            console.log(`✅ Map for ${area.name} saved to ${outputPath}`);
             console.log(`   Image size: ${numTilesX * TILE_SIZE}x${numTilesY * TILE_SIZE} pixels\n`);
         } catch (error) {
-            console.error(`Failed to process ${zipCode}:`, error.message);
+            console.error(`Failed to process ${area.name}:`, error.message);
         }
     }
 };
@@ -236,9 +241,23 @@ const validateConfig = () => {
         console.error('❌ Error: Please set your Geoapify API key in CONFIG.geoapifyKey');
         process.exit(1);
     }
-    if (!CONFIG.zipCodes || CONFIG.zipCodes.length === 0) {
-        console.error('❌ Error: Please add at least one zip code to CONFIG.zipCodes');
+    if (!CONFIG.areas || CONFIG.areas.length === 0) {
+        console.error('❌ Error: Please add at least one area to CONFIG.areas');
+        console.error('   Each area needs: name, point1 {lat, lon}, point2 {lat, lon}');
         process.exit(1);
+    }
+
+    // Validate each area
+    for (const area of CONFIG.areas) {
+        if (!area.name || !area.point1 || !area.point2) {
+            console.error(`❌ Error: Area missing required fields (name, point1, point2)`);
+            process.exit(1);
+        }
+        if (typeof area.point1.lat !== 'number' || typeof area.point1.lon !== 'number' ||
+            typeof area.point2.lat !== 'number' || typeof area.point2.lon !== 'number') {
+            console.error(`❌ Error: Area "${area.name}" has invalid lat/lon coordinates`);
+            process.exit(1);
+        }
     }
 
     // Show attribution for ESRI
