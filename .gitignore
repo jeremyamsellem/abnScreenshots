@@ -5,6 +5,9 @@ node_modules/
 *.png
 !example.png
 
+# Cache folder for downloaded tiles
+data/
+
 # Environment variables
 .env
 

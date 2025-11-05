@@ -1,20 +1,21 @@
 /**
  * High-Resolution Map Capture Tool
  *
- * This tool captures high-definition map images for specified zip codes.
+ * This tool captures high-definition map images for specified coordinate areas.
+ * Uses a 3x3 grid pattern to ensure full coverage of the defined area.
  *
  * SETUP:
  * 1. Install dependencies: npm install axios sharp
- * 2. That's it! ESRI satellite imagery is FREE and requires NO API key or credit card
+ * 2. That's it! No API keys needed for street maps (geoapify) or satellite (ESRI)
  *
  * USAGE:
- * - Set CONFIG.provider to 'esri' for FREE satellite imagery (RECOMMENDED)
- * - Or 'mapbox' for satellite (requires credit card), or 'geoapify' for street maps
- * - Add zip codes to CONFIG.zipCodes array
+ * - Set CONFIG.provider to 'geoapify' for street maps or 'esri' for satellite
+ * - Define areas with two lat/lon points in CONFIG.areas array
+ * - Set use3x3Grid: true to download center + 8 surrounding areas (recommended)
  * - Run: node index.js
  *
  * OUTPUT:
- * - High-resolution PNG files named: {zipCode}_{provider}_zoom{zoom}.png
+ * - High-resolution PNG files named: {areaName}_{provider}_zoom{zoom}.png
  */
 
 const axios = require('axios');
@@ -33,16 +34,40 @@ const CONFIG = {
     geoapifyKey: 'bb4c8bd74f714b58909203373fed1f2a',
     mapboxToken: 'YOUR_MAPBOX_TOKEN_HERE', // Only if using mapbox
 
-    // Map settings
-    zipCodes: ['07030'],
+    // Map areas - Define areas using two lat/lon points (southwest and northeast corners)
+    // IMPORTANT: Keep areas small! At zoom 18, use ~0.01 degree difference (about 1km)
+    areas: [
+        {
+            name: 'downtown_la',
+            point1: { lat: 34.0422, lon: -118.2537 },  // Southwest corner
+            point2: { lat: 34.0522, lon: -118.2437 }   // Northeast corner (~1km x 1km)
+        }
+        // Add more areas as needed:
+        // {
+        //     name: 'santa_monica',
+        //     point1: { lat: 34.014, lon: -118.505 },
+        //     point2: { lat: 34.024, lon: -118.495 }
+        // }
+    ],
+
     zoom: 18, // Higher = more detail (max ~19 for ESRI, ~20-21 for Mapbox)
     tileSize: 256,
+
+    // Download 3x3 grid (center = defined area, 8 surrounding areas of same size)
+    use3x3Grid: true,
+
+    // Maximum tiles to download (safety limit to prevent memory issues)
+    // Increase at your own risk if you have more RAM available
+    maxTiles: 5000,
 
     // Geoapify style options: 'osm-carto', 'osm-bright', 'osm-bright-grey', 'klokantech-basic', 'osm-liberty'
     geoapifyStyle: 'osm-carto',
 
     // Mapbox style options: 'satellite-v9' (pure satellite), 'satellite-streets-v12' (satellite + labels)
-    mapboxStyle: 'satellite-v9'
+    mapboxStyle: 'satellite-v9',
+
+    // Cache settings
+    dataFolder: './data' // Folder to cache downloaded tiles
 };
 
 // Mapbox @2x tiles are 512x512, regular tiles are 256x256
@@ -65,21 +90,39 @@ function lat2tile(lat, zoom) {
   );
 }
 
-// ============ GEOCODING ============
-const geocode = async (zipCode) => {
-    try {
-        const response = await axios.get(`https://api.geoapify.com/v1/geocode/search?text=${zipCode}&type=postcode&apiKey=${CONFIG.geoapifyKey}`);
-        if (response.data.features.length === 0) {
-            throw new Error('No results found');
-        }
-        const { lon, lat, bbox } = response.data.features[0].properties;
-        return { lon, lat, bbox };
-    } catch (error) {
-        if (error.response && error.response.status === 401) {
-            throw new Error('Invalid API key');
-        }
-        throw new Error(`Geocoding failed for ${zipCode}: ${error.message}`);
+// ============ BOUNDING BOX CREATION ============
+const createBoundingBox = (point1, point2) => {
+    // Create bounding box from two points
+    // bbox format: [minLon, minLat, maxLon, maxLat]
+    const minLon = Math.min(point1.lon, point2.lon);
+    const maxLon = Math.max(point1.lon, point2.lon);
+    const minLat = Math.min(point1.lat, point2.lat);
+    const maxLat = Math.max(point1.lat, point2.lat);
+
+    return [minLon, minLat, maxLon, maxLat];
+};
+
+// ============ CACHE MANAGEMENT ============
+const ensureDataFolder = () => {
+    // Create main data folder
+    if (!fs.existsSync(CONFIG.dataFolder)) {
+        fs.mkdirSync(CONFIG.dataFolder, { recursive: true });
+        console.log(`📁 Created cache folder: ${CONFIG.dataFolder}`);
     }
+
+    // Create provider-specific subfolder
+    const providerFolder = `${CONFIG.dataFolder}/${CONFIG.provider}_z${CONFIG.zoom}`;
+    if (!fs.existsSync(providerFolder)) {
+        fs.mkdirSync(providerFolder, { recursive: true });
+        console.log(`📁 Created cache subfolder: ${providerFolder}`);
+    }
+
+    return providerFolder;
+};
+
+const getTileCachePath = (x, y, zoom) => {
+    const providerFolder = `${CONFIG.dataFolder}/${CONFIG.provider}_z${zoom}`;
+    return `${providerFolder}/tile_${x}_${y}.png`;
 };
 
 // ============ TILE URL PROVIDERS ============
@@ -107,11 +150,39 @@ const getTileUrl = (x, y, zoom) => {
 };
 
 // ============ TILE DOWNLOADING ============
+// Cache statistics
+let cacheStats = { hits: 0, misses: 0 };
+
 const getMapTile = async (x, y, zoom) => {
+    const cachePath = getTileCachePath(x, y, zoom);
+
+    // Check if tile exists in cache
+    if (fs.existsSync(cachePath)) {
+        try {
+            cacheStats.hits++;
+            return fs.readFileSync(cachePath);
+        } catch (error) {
+            console.warn(`Cache read failed for tile ${zoom}/${x}/${y}, re-downloading...`);
+            // Continue to download if cache read fails
+        }
+    }
+
+    // Download tile from provider
+    cacheStats.misses++;
     const url = getTileUrl(x, y, zoom);
     try {
         const response = await axios.get(url, { responseType: 'arraybuffer' });
-        return response.data;
+        const tileData = response.data;
+
+        // Save to cache
+        try {
+            fs.writeFileSync(cachePath, tileData);
+        } catch (error) {
+            console.warn(`Failed to cache tile ${zoom}/${x}/${y}: ${error.message}`);
+            // Continue even if caching fails
+        }
+
+        return tileData;
     } catch (error) {
         console.error(`Failed to download tile ${zoom}/${x}/${y} from ${url}`);
         throw new Error(`Failed to download tile ${zoom}/${x}/${y}: ${error.message}`);
@@ -120,31 +191,89 @@ const getMapTile = async (x, y, zoom) => {
 
 // ============ MAIN PROCESSING ============
 const downloadAndStitchMaps = async () => {
+    // Ensure cache directory exists
+    ensureDataFolder();
+
     console.log(`\n🗺️  Map Provider: ${CONFIG.provider.toUpperCase()}`);
-    console.log(`📍 Processing ${CONFIG.zipCodes.length} zip code(s) at zoom level ${CONFIG.zoom}\n`);
+    console.log(`📍 Processing ${CONFIG.areas.length} area(s) at zoom level ${CONFIG.zoom}\n`);
 
-    for (const zipCode of CONFIG.zipCodes) {
+    for (const area of CONFIG.areas) {
         try {
-            console.log(`Processing ${zipCode}...`);
-            let { bbox, lon, lat } = await geocode(zipCode);
+            console.log(`Processing area: ${area.name}...`);
 
-            if (!bbox || !Array.isArray(bbox) || bbox.length !== 4) {
-                console.warn(`Warning: Bounding box not found for ${zipCode}. Creating a default one.`);
-                const halfSide = 0.005; // Roughly 0.5km in degrees
-                bbox = [lon - halfSide, lat - halfSide, lon + halfSide, lat + halfSide];
-            }
-
+            // Create bounding box from the two points
+            const bbox = createBoundingBox(area.point1, area.point2);
             const [minLon, minLat, maxLon, maxLat] = bbox;
 
-            const minTileX = long2tile(minLon, CONFIG.zoom);
-            const maxTileX = long2tile(maxLon, CONFIG.zoom);
-            const minTileY = lat2tile(maxLat, CONFIG.zoom);
-            const maxTileY = lat2tile(minLat, CONFIG.zoom);
+            // Log bounding box
+            console.log(`Area bbox: [${minLon.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLon.toFixed(6)}, ${maxLat.toFixed(6)}]`);
+            console.log(`  Point 1: (${area.point1.lat}, ${area.point1.lon})`);
+            console.log(`  Point 2: (${area.point2.lat}, ${area.point2.lon})`);
+
+            // Calculate tile range for the defined area
+            const centerMinTileX = long2tile(minLon, CONFIG.zoom);
+            const centerMaxTileX = long2tile(maxLon, CONFIG.zoom);
+            const centerMinTileY = lat2tile(maxLat, CONFIG.zoom);
+            const centerMaxTileY = lat2tile(minLat, CONFIG.zoom);
+
+            const centerNumTilesX = centerMaxTileX - centerMinTileX + 1;
+            const centerNumTilesY = centerMaxTileY - centerMinTileY + 1;
+            const centerTileCount = centerNumTilesX * centerNumTilesY;
+
+            console.log(`Center area: X[${centerMinTileX} to ${centerMaxTileX}] (${centerNumTilesX} tiles), Y[${centerMinTileY} to ${centerMaxTileY}] (${centerNumTilesY} tiles)`);
+
+            // Calculate total tile count with 3x3 grid
+            const totalTileCount = CONFIG.use3x3Grid ? centerTileCount * 9 : centerTileCount;
+            const estimatedMemoryMB = Math.round((totalTileCount * TILE_SIZE * TILE_SIZE * 4) / (1024 * 1024));
+
+            // Safety check: prevent downloading too many tiles
+            if (totalTileCount > CONFIG.maxTiles) {
+                console.error(`\n❌ ERROR: Area too large!`);
+                console.error(`   This area requires ${totalTileCount.toLocaleString()} tiles (${centerTileCount.toLocaleString()} center + ${CONFIG.use3x3Grid ? '8 surrounding areas' : 'no grid'})`);
+                console.error(`   Maximum allowed: ${CONFIG.maxTiles.toLocaleString()} tiles`);
+                console.error(`   Estimated memory needed: ~${estimatedMemoryMB}MB\n`);
+                console.error(`Solutions:`);
+                console.error(`   1. Reduce area size (move coordinates closer together)`);
+                console.error(`   2. Lower zoom level (try 15 or 16 instead of ${CONFIG.zoom})`);
+                console.error(`   3. Disable 3x3 grid: set use3x3Grid: false`);
+                console.error(`   4. Increase maxTiles limit (if you have enough RAM)`);
+                console.error(`\nExample of a reasonable area at zoom 18:`);
+                console.error(`   point1: { lat: 34.0522, lon: -118.2437 }`);
+                console.error(`   point2: { lat: 34.0622, lon: -118.2337 }  (about 1km x 1km)\n`);
+                process.exit(1);
+            }
+
+            console.log(`   Estimated tiles: ${totalTileCount.toLocaleString()} (~${estimatedMemoryMB}MB memory)`);
+
+            // Expand to 3x3 grid if enabled
+            let minTileX, maxTileX, minTileY, maxTileY;
+            if (CONFIG.use3x3Grid) {
+                // Add the same width/height on each side to create a 3x3 grid
+                minTileX = centerMinTileX - centerNumTilesX;
+                maxTileX = centerMaxTileX + centerNumTilesX;
+                minTileY = centerMinTileY - centerNumTilesY;
+                maxTileY = centerMaxTileY + centerNumTilesY;
+
+                const numTilesX = maxTileX - minTileX + 1;
+                const numTilesY = maxTileY - minTileY + 1;
+
+                console.log(`📐 Using 3x3 grid pattern:`);
+                console.log(`   Full area: X[${minTileX} to ${maxTileX}] (${numTilesX} tiles), Y[${minTileY} to ${maxTileY}] (${numTilesY} tiles)`);
+                console.log(`   Downloading ${numTilesX * numTilesY} tiles (center area + 8 surrounding areas)...`);
+            } else {
+                minTileX = centerMinTileX;
+                maxTileX = centerMaxTileX;
+                minTileY = centerMinTileY;
+                maxTileY = centerMaxTileY;
+                console.log(`Downloading ${centerNumTilesX * centerNumTilesY} tiles...`);
+            }
 
             const numTilesX = maxTileX - minTileX + 1;
             const numTilesY = maxTileY - minTileY + 1;
 
-            console.log(`Downloading ${numTilesX * numTilesY} tiles for ${zipCode}...`);
+            // Reset cache stats for this area
+            const beforeHits = cacheStats.hits;
+            const beforeMisses = cacheStats.misses;
 
             const tilePromises = [];
             for (let y = minTileY; y <= maxTileY; y++) {
@@ -154,6 +283,14 @@ const downloadAndStitchMaps = async () => {
             }
 
             const tileBuffers = await Promise.all(tilePromises);
+
+            // Calculate cache stats for this area
+            const areaHits = cacheStats.hits - beforeHits;
+            const areaMisses = cacheStats.misses - beforeMisses;
+            const totalTiles = areaHits + areaMisses;
+            const cachePercent = totalTiles > 0 ? Math.round((areaHits / totalTiles) * 100) : 0;
+
+            console.log(`   💾 Cache: ${areaHits} from cache, ${areaMisses} downloaded (${cachePercent}% cached)`);
 
             const compositeOptions = [];
             for (let y = minTileY; y <= maxTileY; y++) {
@@ -179,12 +316,12 @@ const downloadAndStitchMaps = async () => {
                 .png()
                 .toBuffer();
 
-            const outputPath = `./${zipCode}_${CONFIG.provider}_zoom${CONFIG.zoom}.png`;
+            const outputPath = `./${area.name}_${CONFIG.provider}_zoom${CONFIG.zoom}.png`;
             fs.writeFileSync(outputPath, stitchedImage);
-            console.log(`✅ Map for ${zipCode} saved to ${outputPath}`);
+            console.log(`✅ Map for ${area.name} saved to ${outputPath}`);
             console.log(`   Image size: ${numTilesX * TILE_SIZE}x${numTilesY * TILE_SIZE} pixels\n`);
         } catch (error) {
-            console.error(`Failed to process ${zipCode}:`, error.message);
+            console.error(`Failed to process ${area.name}:`, error.message);
         }
     }
 };
@@ -202,9 +339,23 @@ const validateConfig = () => {
         console.error('❌ Error: Please set your Geoapify API key in CONFIG.geoapifyKey');
         process.exit(1);
     }
-    if (!CONFIG.zipCodes || CONFIG.zipCodes.length === 0) {
-        console.error('❌ Error: Please add at least one zip code to CONFIG.zipCodes');
+    if (!CONFIG.areas || CONFIG.areas.length === 0) {
+        console.error('❌ Error: Please add at least one area to CONFIG.areas');
+        console.error('   Each area needs: name, point1 {lat, lon}, point2 {lat, lon}');
         process.exit(1);
+    }
+
+    // Validate each area
+    for (const area of CONFIG.areas) {
+        if (!area.name || !area.point1 || !area.point2) {
+            console.error(`❌ Error: Area missing required fields (name, point1, point2)`);
+            process.exit(1);
+        }
+        if (typeof area.point1.lat !== 'number' || typeof area.point1.lon !== 'number' ||
+            typeof area.point2.lat !== 'number' || typeof area.point2.lon !== 'number') {
+            console.error(`❌ Error: Area "${area.name}" has invalid lat/lon coordinates`);
+            process.exit(1);
+        }
     }
 
     // Show attribution for ESRI
