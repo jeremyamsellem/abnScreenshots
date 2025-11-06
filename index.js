@@ -352,7 +352,7 @@ const downloadAndStitchMaps = async () => {
                     // Ensure all tiles are exactly TILE_SIZE x TILE_SIZE
                     const processedTiles = await Promise.all(
                         blockTileBuffers.map(buffer =>
-                            sharp(buffer)
+                            sharp(buffer, { limitInputPixels: 0 })
                                 .resize(TILE_SIZE, TILE_SIZE, {
                                     fit: 'fill'
                                 })
@@ -384,7 +384,7 @@ const downloadAndStitchMaps = async () => {
                             channels: 4,
                             background: { r: 0, g: 0, b: 0, alpha: 0 },
                         },
-                    })
+                    }, { limitInputPixels: 0 })
                         .composite(blockCompositeOptions)
                         .png()
                         .toFile(blockFilePath);
@@ -421,8 +421,8 @@ const downloadAndStitchMaps = async () => {
                             const file1 = currentRowFiles[i];
                             const file2 = currentRowFiles[i + 1];
 
-                            const meta1 = await sharp(file1).metadata();
-                            const meta2 = await sharp(file2).metadata();
+                            const meta1 = await sharp(file1, { limitInputPixels: 0 }).metadata();
+                            const meta2 = await sharp(file2, { limitInputPixels: 0 }).metadata();
 
                             const stitchedPath = path.join(tempFolder, `row${blockY}_iter${iteration}_${Math.floor(i / 2)}.png`);
 
@@ -434,7 +434,7 @@ const downloadAndStitchMaps = async () => {
                                     channels: 4,
                                     background: { r: 0, g: 0, b: 0, alpha: 0 },
                                 },
-                            })
+                            }, { limitInputPixels: 0 })
                                 .composite([
                                     { input: file1, left: 0, top: 0 },
                                     { input: file2, left: meta1.width, top: 0 }
@@ -471,8 +471,8 @@ const downloadAndStitchMaps = async () => {
                         const file1 = currentFiles[i];
                         const file2 = currentFiles[i + 1];
 
-                        const meta1 = await sharp(file1).metadata();
-                        const meta2 = await sharp(file2).metadata();
+                        const meta1 = await sharp(file1, { limitInputPixels: 0 }).metadata();
+                        const meta2 = await sharp(file2, { limitInputPixels: 0 }).metadata();
 
                         const stitchedPath = path.join(tempFolder, `final_iter${iteration}_${Math.floor(i / 2)}.png`);
 
@@ -484,7 +484,7 @@ const downloadAndStitchMaps = async () => {
                                 channels: 4,
                                 background: { r: 0, g: 0, b: 0, alpha: 0 },
                             },
-                        })
+                        }, { limitInputPixels: 0 })
                             .composite([
                                 { input: file1, left: 0, top: 0 },
                                 { input: file2, left: 0, top: meta1.height }
