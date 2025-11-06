@@ -87,8 +87,13 @@ const CONFIG = {
     dataFolder: './data' // Folder to cache downloaded tiles
 };
 
-// Mapbox @2x tiles are 512x512, other providers use configured size
-const TILE_SIZE = CONFIG.provider === 'mapbox' ? 512 : CONFIG.tileSize;
+// Tile sizes vary by provider:
+// - Mapbox @2x tiles are 512x512
+// - ESRI tiles are 256x256
+// - Geoapify uses configured size (default 512)
+const TILE_SIZE = CONFIG.provider === 'mapbox' ? 512 :
+                  (CONFIG.provider === 'esri' || CONFIG.provider === 'esri-streets' || CONFIG.provider === 'esri-topo') ? 256 :
+                  CONFIG.tileSize;
 
 // Function to convert longitude and latitude to tile numbers
 function long2tile(lon, zoom) {
