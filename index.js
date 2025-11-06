@@ -31,8 +31,10 @@ const CONFIG = {
     // Provider options:
     // - 'geoapify' (street map, free) ⭐ DEFAULT
     // - 'esri' (FREE satellite, no credit card required)
+    // - 'esri-streets' (FREE street map, no credit card required)
+    // - 'esri-topo' (FREE topographic map, no credit card required)
     // - 'mapbox' (satellite, requires credit card for free tier)
-    provider: 'geoapify',
+    provider: 'esri-streets',
 
     // API Keys (only needed for certain providers)
     geoapifyKey: 'bb4c8bd74f714b58909203373fed1f2a',
@@ -162,6 +164,18 @@ const getTileUrl = (x, y, zoom) => {
             // Docs: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer
             // Attribution: "Powered by Esri" (automatically added to console output)
             return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
+
+        case 'esri-streets':
+            // ESRI World Street Map - FREE, no API key required!
+            // Docs: https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer
+            // Attribution: "Powered by Esri"
+            return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${zoom}/${y}/${x}`;
+
+        case 'esri-topo':
+            // ESRI World Topographic Map - FREE, no API key required!
+            // Docs: https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer
+            // Attribution: "Powered by Esri"
+            return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${zoom}/${y}/${x}`;
 
         case 'mapbox':
             // Mapbox Static Tiles API (requires credit card for free tier)
@@ -431,6 +445,14 @@ const validateConfig = () => {
     // Show attribution for ESRI
     if (CONFIG.provider === 'esri') {
         console.log('📸 Using ESRI World Imagery (FREE satellite imagery)');
+        console.log('   Attribution: Powered by Esri\n');
+    }
+    if (CONFIG.provider === 'esri-streets') {
+        console.log('🗺️  Using ESRI World Street Map (FREE street map)');
+        console.log('   Attribution: Powered by Esri\n');
+    }
+    if (CONFIG.provider === 'esri-topo') {
+        console.log('🗺️  Using ESRI World Topographic Map (FREE topographic map)');
         console.log('   Attribution: Powered by Esri\n');
     }
 };
