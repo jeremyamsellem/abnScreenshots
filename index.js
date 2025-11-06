@@ -3,7 +3,7 @@
  *
  * This tool captures high-definition map images for specified coordinate areas.
  * Uses a 3x3 grid pattern to ensure full coverage of the defined area.
- * Features disk-based block stitching with recursive 2-by-2 merging to avoid Sharp's limitations.
+ * Features disk-based block stitching with file-to-file operations to avoid Sharp's limitations.
  *
  * SETUP:
  * 1. Install dependencies: npm install axios sharp
@@ -20,12 +20,13 @@
  * - Phase 1: Tiles are divided into 10x10 blocks, each block stitched and saved to disk
  * - Phase 2: Blocks are stitched horizontally (recursively 2-by-2) into block rows
  * - Phase 3: Block rows are stitched vertically (recursively 2-by-2) to create final image
- * - All intermediate results written to disk to avoid Sharp's dimension/memory limits
+ * - All operations use Sharp's file-to-file mode (no buffers) to avoid memory limits
+ * - Images never loaded into memory - Sharp streams directly from/to disk
  *
  * OUTPUT:
  * - High-resolution PNG files named: {areaName}_{provider}_zoom{zoom}.png
  * - Can handle extremely large maps (50,000+ tiles) with minimal memory usage
- * - No Sharp limitations on image dimensions or composite operations
+ * - No Sharp buffer limitations - only disk space is the limit
  */
 
 const axios = require('axios');
@@ -374,8 +375,9 @@ const downloadAndStitchMaps = async () => {
                         }
                     }
 
-                    // Create block image
-                    const blockImage = await sharp({
+                    // Create block image - save directly to file (no buffer)
+                    const blockFilePath = path.join(tempFolder, `block_${blockY}_${blockX}.png`);
+                    await sharp({
                         create: {
                             width: blockNumTilesX * TILE_SIZE,
                             height: blockNumTilesY * TILE_SIZE,
@@ -385,11 +387,7 @@ const downloadAndStitchMaps = async () => {
                     })
                         .composite(blockCompositeOptions)
                         .png()
-                        .toBuffer();
-
-                    // Save block to disk
-                    const blockFilePath = path.join(tempFolder, `block_${blockY}_${blockX}.png`);
-                    fs.writeFileSync(blockFilePath, blockImage);
+                        .toFile(blockFilePath);
 
                     if (!blockFiles[blockY]) blockFiles[blockY] = [];
                     blockFiles[blockY][blockX] = blockFilePath;
@@ -426,11 +424,10 @@ const downloadAndStitchMaps = async () => {
                             const meta1 = await sharp(file1).metadata();
                             const meta2 = await sharp(file2).metadata();
 
-                            const img1Buffer = await sharp(file1).toBuffer();
-                            const img2Buffer = await sharp(file2).toBuffer();
+                            const stitchedPath = path.join(tempFolder, `row${blockY}_iter${iteration}_${Math.floor(i / 2)}.png`);
 
-                            // Stitch horizontally
-                            const stitched = await sharp({
+                            // Stitch horizontally using file-based operations (no buffers)
+                            await sharp({
                                 create: {
                                     width: meta1.width + meta2.width,
                                     height: meta1.height,
@@ -439,14 +436,12 @@ const downloadAndStitchMaps = async () => {
                                 },
                             })
                                 .composite([
-                                    { input: img1Buffer, left: 0, top: 0 },
-                                    { input: img2Buffer, left: meta1.width, top: 0 }
+                                    { input: file1, left: 0, top: 0 },
+                                    { input: file2, left: meta1.width, top: 0 }
                                 ])
                                 .png()
-                                .toBuffer();
+                                .toFile(stitchedPath);
 
-                            const stitchedPath = path.join(tempFolder, `row${blockY}_iter${iteration}_${Math.floor(i / 2)}.png`);
-                            fs.writeFileSync(stitchedPath, stitched);
                             nextFiles.push(stitchedPath);
                         } else {
                             nextFiles.push(currentRowFiles[i]);
@@ -479,11 +474,10 @@ const downloadAndStitchMaps = async () => {
                         const meta1 = await sharp(file1).metadata();
                         const meta2 = await sharp(file2).metadata();
 
-                        const img1Buffer = await sharp(file1).toBuffer();
-                        const img2Buffer = await sharp(file2).toBuffer();
+                        const stitchedPath = path.join(tempFolder, `final_iter${iteration}_${Math.floor(i / 2)}.png`);
 
-                        // Stitch vertically
-                        const stitched = await sharp({
+                        // Stitch vertically using file-based operations (no buffers)
+                        await sharp({
                             create: {
                                 width: meta1.width,
                                 height: meta1.height + meta2.height,
@@ -492,14 +486,12 @@ const downloadAndStitchMaps = async () => {
                             },
                         })
                             .composite([
-                                { input: img1Buffer, left: 0, top: 0 },
-                                { input: img2Buffer, left: 0, top: meta1.height }
+                                { input: file1, left: 0, top: 0 },
+                                { input: file2, left: 0, top: meta1.height }
                             ])
                             .png()
-                            .toBuffer();
+                            .toFile(stitchedPath);
 
-                        const stitchedPath = path.join(tempFolder, `final_iter${iteration}_${Math.floor(i / 2)}.png`);
-                        fs.writeFileSync(stitchedPath, stitched);
                         nextFiles.push(stitchedPath);
                     } else {
                         nextFiles.push(currentFiles[i]);
